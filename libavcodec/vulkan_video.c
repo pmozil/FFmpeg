@@ -37,7 +37,7 @@ const FFVkCodecMap ff_vk_codec_map[AV_CODEC_ID_FIRST_AUDIO] = {
                            0,
                            0,
                            FF_VK_EXT_VIDEO_DECODE_AV1,
-                           0x01000000 /* TODO fix this */
+                           VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR
     },
 };
 
@@ -196,6 +196,37 @@ int ff_vk_h265_level_to_av(StdVideoH265LevelIdc level)
     case STD_VIDEO_H265_LEVEL_IDC_6_1: return 61;
     default:
     case STD_VIDEO_H265_LEVEL_IDC_6_2: return 62;
+    }
+}
+
+int ff_vk_av1_level_to_av(StdVideoAV1Level level)
+{
+    switch (level) {
+    case STD_VIDEO_AV1_LEVEL_2_0: return 20;
+    case STD_VIDEO_AV1_LEVEL_2_1: return 21;
+    case STD_VIDEO_AV1_LEVEL_2_2: return 22;
+    case STD_VIDEO_AV1_LEVEL_2_3: return 23;
+    case STD_VIDEO_AV1_LEVEL_3_0: return 30;
+    case STD_VIDEO_AV1_LEVEL_3_1: return 31;
+    case STD_VIDEO_AV1_LEVEL_3_2: return 32;
+    case STD_VIDEO_AV1_LEVEL_3_3: return 33;
+    case STD_VIDEO_AV1_LEVEL_4_0: return 40;
+    case STD_VIDEO_AV1_LEVEL_4_1: return 41;
+    case STD_VIDEO_AV1_LEVEL_4_2: return 42;
+    case STD_VIDEO_AV1_LEVEL_4_3: return 43;
+    case STD_VIDEO_AV1_LEVEL_5_0: return 50;
+    case STD_VIDEO_AV1_LEVEL_5_1: return 51;
+    case STD_VIDEO_AV1_LEVEL_5_2: return 52;
+    case STD_VIDEO_AV1_LEVEL_5_3: return 53;
+    case STD_VIDEO_AV1_LEVEL_6_0: return 60;
+    case STD_VIDEO_AV1_LEVEL_6_1: return 61;
+    case STD_VIDEO_AV1_LEVEL_6_2: return 62;
+    case STD_VIDEO_AV1_LEVEL_6_3: return 63;
+    case STD_VIDEO_AV1_LEVEL_7_0: return 70;
+    case STD_VIDEO_AV1_LEVEL_7_1: return 71;
+    case STD_VIDEO_AV1_LEVEL_7_2: return 72;
+    default:
+    case STD_VIDEO_AV1_LEVEL_7_3: return 73;
     }
 }
 
