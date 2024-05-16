@@ -16,15 +16,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "avcodec.h"
 #include "diracdec.h"
+#include "vulkan.h"
 #include "hwaccel_internal.h"
 #include "libavfilter/vulkan_spirv.h"
 #include "vulkan_decode.h"
-#include "vulkan.h"
 
-
-struct DiracVulkaDecodeContext {
+typedef  struct DiracVulkanDecodeContext {
     DiracContext *dirac_ctx;
 
     FFVulkanContext vkctx;
@@ -37,7 +35,7 @@ struct DiracVulkaDecodeContext {
 
     FFVulkanPipeline quant_pl[2];
     FFVkSPIRVShader quant_shd[2];
-} DiracVulkaDecodeContext;
+} DiracVulkanDecodeContext;
 
 static const char dequant_16bit[] = {
     C(0, void dequant_16bit(int idx) {                  )
@@ -63,15 +61,16 @@ static const char dequant_32bit[] = {
     C(0, }                                              )
 };
 
-int init_quant_shd(DiracVulkaDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
+int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
 {
     int err = 0;
     uint8_t *spv_data;
     size_t spv_len;
     void *spv_opaque = NULL;
 
-    FFVkSPIRVShader *shd = s->quant_shd[idx];
-    FFVulkanPipeline *pl = s->quant_pl[idx];
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVkSPIRVShader *shd = &s->quant_shd[idx];
+    FFVulkanPipeline *pl = &s->quant_pl[idx];
     FFVulkanDescriptorSetBinding *desc = (FFVulkanDescriptorSetBinding[])
     {
         {
@@ -101,7 +100,7 @@ int init_quant_shd(DiracVulkaDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
     GLSLC(0,                                                       );
 
     ff_vk_add_push_constant(pl, 0, sizeof(SliceCoeffsPuchConst), VK_SHADER_STAGE_COMPUTE_BIT);
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, &s->pl, shd, desc, 2, 0, 0));
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
 
 
     GLSLC(0, void main()                          );
@@ -128,7 +127,7 @@ fail:
 
 int vulkan_dirac_uninit(AVCodecContext *avctx)
 {
-    DiracVulkaDecodeContext *s = avctx->internal->hwaccel_priv_data;
+    DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVulkanFunctions *vk = &vkctx->vkfn;
 
@@ -155,9 +154,15 @@ int vulkan_dirac_uninit(AVCodecContext *avctx)
 int vulkan_dirac_init(AVCodecContext *avctx)
 {
     int err;
-    DiracVulkaDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
+    DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s = &ctx->vkctx;
     FFVulkanFunctions *vk = &s->vkfn;
+    FFVkSPIRVCompiler *spv = ff_vk_spirv_init();
+    if (!spv) {
+        av_log(ctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
+        return AVERROR_EXTERNAL;
+    }
+
 
     s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
     s->frames = (AVHWFramesContext *)s->frames_ref->data;
@@ -167,10 +172,10 @@ int vulkan_dirac_init(AVCodecContext *avctx)
     s->hwctx = s->device->hwctx;
 
     RET(ff_vk_load_props(s));
-    ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_VOMPUTE_BIT_KHR);
-    RET(ff_vk_exec_pool_init(vkctx, &s->qf, &s->e, s->qf.nb_queues * 4, 0, 0, 0,
+    ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_COMPUTE_BIT);
+    RET(ff_vk_exec_pool_init(s, &ctx->qf, &ctx->e, ctx->qf.nb_queues * 4, 0, 0, 0,
                            NULL));
-    RET(ff_vk_init_sampler(vkctx, &s->sampler, 1, VK_FILTER_LINEAR));
+    RET(ff_vk_init_sampler(s, &ctx->sampler, 1, VK_FILTER_LINEAR));
 
     // init_quant_shd
 
@@ -197,7 +202,7 @@ const FFHWAccel ff_av1_vulkan_hwaccel = {
     .uninit                = &vulkan_dirac_uninit,
     // .frame_params          = &ff_vk_frame_params,
     // .frame_priv_data_size  = sizeof(AV1VulkanDecodePicture),
-    .priv_data_size        = sizeof(DiracVulkaDecodeContext),
+    .priv_data_size        = sizeof(DiracVulkanDecodeContext),
 
     /* NOTE: Threading is intentionally disabled here. Due to the design of Vulkan,
      * where frames are opaque to users, and mostly opaque for driver developers,
