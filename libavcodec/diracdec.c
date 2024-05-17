@@ -27,7 +27,9 @@
  */
 
 #include "diracdec.h"
+#include "hwaccels.h"
 #include "hwconfig.h"
+#include "config_components.h"
 
 /* magic number division by 3 from schroedinger */
 static inline int divide3(int x)
@@ -2144,8 +2146,8 @@ const FFCodec ff_dirac_decoder = {
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_DR1,
     .flush          = dirac_decode_flush,
     .hw_configs     = (const AVCodecHWConfigInternal *const []) {
-#if CONFIG_HEVC_VULKAN_HWACCEL
-        HWACCEL_VULKAN(hevc),
+#if CONFIG_DIRAC_VULKAN_HWACCEL
+        HWACCEL_VULKAN(dirac),
 #endif
         NULL
     },

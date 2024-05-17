@@ -127,6 +127,7 @@ fail:
 
 static int vulkan_dirac_uninit(AVCodecContext *avctx)
 {
+    av_log(avctx, AV_LOG_INFO, "STARTING UNINIT\n");
     DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVulkanFunctions *vk = &vkctx->vkfn;
@@ -155,12 +156,14 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx)
 
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
+    av_log(avctx, AV_LOG_INFO, "STARTING INIT\n");
+    ff_vk_decode_init(avctx);
     int err;
     DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s = &ctx->vkctx;
     FFVkSPIRVCompiler *spv = ff_vk_spirv_init();
     if (!spv) {
-        av_log(ctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
+        av_log(avctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
         return AVERROR_EXTERNAL;
     }
 
@@ -188,9 +191,9 @@ fail:
 }
 
 const FFHWAccel ff_dirac_vulkan_hwaccel = {
-    .p.name                = "av1_vulkan",
+    .p.name                = "dirac_vulkan",
     .p.type                = AVMEDIA_TYPE_VIDEO,
-    .p.id                  = AV_CODEC_ID_AV1,
+    .p.id                  = AV_CODEC_ID_DIRAC,
     .p.pix_fmt             = AV_PIX_FMT_VULKAN,
     // .start_frame           = &vk_av1_start_frame,
     // .decode_slice          = &vk_av1_decode_slice,
@@ -214,5 +217,6 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
      * The current implementation tracks the index for the driver and submits it
      * as necessary information. Due to needing to modify the decoding context,
      * which is not thread-safe, on frame free, threading is disabled. */
-    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
+    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
+    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
 };
