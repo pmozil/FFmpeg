@@ -61,7 +61,7 @@ static const char dequant_32bit[] = {
     C(0, }                                              )
 };
 
-int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
+static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
 {
     int err = 0;
     uint8_t *spv_data;
@@ -125,7 +125,7 @@ fail:
     return err;
 }
 
-int vulkan_dirac_uninit(AVCodecContext *avctx)
+static int vulkan_dirac_uninit(AVCodecContext *avctx)
 {
     DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *vkctx = &s->vkctx;
@@ -149,14 +149,15 @@ int vulkan_dirac_uninit(AVCodecContext *avctx)
       vk->DestroySampler(vkctx->hwctx->act_dev, s->sampler, vkctx->hwctx->alloc);
 
     ff_vk_uninit(&s->vkctx);
+
+    return 0;
 }
 
-int vulkan_dirac_init(AVCodecContext *avctx)
+static int vulkan_dirac_init(AVCodecContext *avctx)
 {
     int err;
     DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s = &ctx->vkctx;
-    FFVulkanFunctions *vk = &s->vkfn;
     FFVkSPIRVCompiler *spv = ff_vk_spirv_init();
     if (!spv) {
         av_log(ctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
@@ -186,7 +187,7 @@ fail:
     return err;
 }
 
-const FFHWAccel ff_av1_vulkan_hwaccel = {
+const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .p.name                = "av1_vulkan",
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_AV1,
