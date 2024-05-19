@@ -127,10 +127,11 @@ fail:
 
 static int vulkan_dirac_uninit(AVCodecContext *avctx)
 {
-    av_log(avctx, AV_LOG_INFO, "STARTING UNINIT\n");
     DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVulkanFunctions *vk = &vkctx->vkfn;
+
+    av_log(avctx, AV_LOG_INFO, "STARTING UNINIT\n");
 
     ff_vk_exec_pool_free(vkctx, &s->e);
 
@@ -156,17 +157,26 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx)
 
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
-    av_log(avctx, AV_LOG_INFO, "STARTING INIT\n");
-    ff_vk_decode_init(avctx);
     int err;
     DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s = &ctx->vkctx;
-    FFVkSPIRVCompiler *spv = ff_vk_spirv_init();
+    FFVkSPIRVCompiler *spv;
+
+    av_log(avctx, AV_LOG_INFO, "STARTING INIT\n");
+    err = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_VULKAN);
+    if (err < 0) {
+        av_log(avctx, AV_LOG_ERROR, "Could not create hardware frame context\n");
+        return err;
+    }
+    av_log(avctx, AV_LOG_INFO, "This fine?\n");
+
+    spv = ff_vk_spirv_init();
     if (!spv) {
         av_log(avctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
         return AVERROR_EXTERNAL;
     }
 
+    // ff_vk_decode_init()
 
     s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
     s->frames = (AVHWFramesContext *)s->frames_ref->data;
@@ -186,6 +196,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     spv->uninit(&spv);
     return 0;
 fail:
+    spv->uninit(&spv);
     ff_vk_decode_uninit(avctx);
     return err;
 }
