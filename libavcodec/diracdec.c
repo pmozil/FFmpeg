@@ -30,6 +30,7 @@
 #include "hwaccels.h"
 #include "hwconfig.h"
 #include "config_components.h"
+#include <libavutil/log.h>
 
 /* magic number division by 3 from schroedinger */
 static inline int divide3(int x)
@@ -1910,6 +1911,15 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
     init_get_bits(&s->gb, &buf[13], 8*(size - DATA_UNIT_HEADER_SIZE));
 
+    enum AVPixelFormat pix_fmts[] = {
+#if CONFIG_DIRAC_VULKAN_HWACCEL
+        AV_PIX_FMT_VULKAN,
+#endif
+        avctx->pix_fmt,
+        AV_PIX_FMT_NONE,
+    };
+    enum AVPixelFormat pix_fmt = ff_get_format(s->avctx, pix_fmts);
+    av_log(avctx, AV_LOG_INFO, "Fmt = %i\n", pix_fmt);
     if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
         if (s->seen_sequence_header)
             return 0;
@@ -1931,7 +1941,22 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         ff_set_sar(avctx, dsh->sample_aspect_ratio);
-        avctx->pix_fmt         = dsh->pix_fmt;
+
+        enum AVPixelFormat pix_fmts[] = {
+#if CONFIG_DIRAC_VULKAN_HWACCEL
+            AV_PIX_FMT_VULKAN,
+#endif
+            dsh->pix_fmt,
+            AV_PIX_FMT_NONE,
+        };
+
+        enum AVPixelFormat pix_fmt = ff_get_format(s->avctx, pix_fmts);
+        if (pix_fmt < 0) {
+            av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
+            return AVERROR(EINVAL);
+        }
+        // avctx->pix_fmt         = dsh->pix_fmt;
+        avctx->pix_fmt         = pix_fmt;
         avctx->color_range     = dsh->color_range;
         avctx->color_trc       = dsh->color_trc;
         avctx->color_primaries = dsh->color_primaries;
