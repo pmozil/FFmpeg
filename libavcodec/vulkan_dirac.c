@@ -37,6 +37,11 @@ typedef  struct DiracVulkanDecodeContext {
     FFVkSPIRVShader quant_shd[2];
 } DiracVulkanDecodeContext;
 
+typedef  struct DiracVulkanDecodePicture {
+    DiracVulkanDecodeContext *s;
+    DiracFrame *pic;
+} DiracVulkanDecodePicture;
+
 static const char dequant_16bit[] = {
     C(0, void dequant_16bit(int idx) {                  )
     C(1,     int16_t val = inBuffer[idx];               )
@@ -216,7 +221,7 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     // .flush                 = &ff_vk_decode_flush,
     .uninit                = &vulkan_dirac_uninit,
     // .frame_params          = &ff_vk_frame_params,
-    // .frame_priv_data_size  = sizeof(AV1VulkanDecodePicture),
+    .frame_priv_data_size  = sizeof(DiracVulkanDecodePicture),
     .priv_data_size        = sizeof(DiracVulkanDecodeContext),
 
     /* NOTE: Threading is intentionally disabled here. Due to the design of Vulkan,
