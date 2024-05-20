@@ -23,22 +23,15 @@
 #include "libavfilter/vulkan_spirv.h"
 #include "vulkan_decode.h"
 
-typedef  struct DiracVulkanDecodeContext {
-    FFVulkanContext vkctx;
-    FFVkExecPool e;
-    FFVkQueueFamilyCtx qf;
-    VkSampler sampler;
+typedef  struct DiracVulkanDecodePicture {
+    DiracFrame *pic;
+    FFVulkanDecodeContext *ctx;
 
     FFVulkanPipeline wavelet_pl[7];
     FFVkSPIRVShader wavelet_shd[7];
 
     FFVulkanPipeline quant_pl[2];
     FFVkSPIRVShader quant_shd[2];
-} DiracVulkanDecodeContext;
-
-typedef  struct DiracVulkanDecodePicture {
-    DiracVulkanDecodeContext *s;
-    DiracFrame *pic;
 } DiracVulkanDecodePicture;
 
 static const char dequant_16bit[] = {
@@ -65,14 +58,15 @@ static const char dequant_32bit[] = {
     C(0, }                                              )
 };
 
-static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
+static int init_quant_shd(DiracVulkanDecodePicture *s, FFVkSPIRVCompiler *spv, int idx)
 {
     int err = 0;
     uint8_t *spv_data;
     size_t spv_len;
     void *spv_opaque = NULL;
 
-    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDecodeShared *sh = s->ctx->shared_ctx;
+    FFVulkanContext *vkctx = &sh->s;
     FFVkSPIRVShader *shd = &s->quant_shd[idx];
     FFVulkanPipeline *pl = &s->quant_pl[idx];
     FFVulkanDescriptorSetBinding *desc = (FFVulkanDescriptorSetBinding[])
@@ -120,7 +114,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, i
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
     RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
     RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
-    RET(ff_vk_exec_pipeline_register(vkctx, &s->e, pl));
+    RET(ff_vk_exec_pipeline_register(vkctx, &s->ctx->exec_pool, pl));
 
 fail:
     if (spv_opaque)
@@ -129,111 +123,175 @@ fail:
     return err;
 }
 
-static int vulkan_dirac_uninit(AVCodecContext *avctx)
-{
-    DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
-    FFVulkanContext *vkctx = &s->vkctx;
-    FFVulkanFunctions *vk = &vkctx->vkfn;
-
-    av_log(avctx, AV_LOG_INFO, "STARTING UNINIT\n");
-
-    ff_vk_exec_pool_free(vkctx, &s->e);
-
-    for (int i = 0; i < 2; i++)
-    {
-        ff_vk_pipeline_free(vkctx, &s->quant_pl[i]);
-        ff_vk_shader_free(vkctx, &s->quant_shd[i]);
-    }
-
-    for (int i = 0; i < 7; i++)
-    {
-        ff_vk_pipeline_free(vkctx, &s->wavelet_pl[i]);
-        ff_vk_shader_free(vkctx, &s->wavelet_shd[i]);
-    }
-
-    if (s->sampler)
-      vk->DestroySampler(vkctx->hwctx->act_dev, s->sampler, vkctx->hwctx->alloc);
-
-    ff_vk_uninit(&s->vkctx);
-
-    return 0;
-}
-
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
-    int err;
-    DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
-    DiracContext *d_ctx = avctx->priv_data;
-    FFVulkanContext *s = &ctx->vkctx;
-    FFVkSPIRVCompiler *spv;
-    AVHWFramesContext *frames_ctx;
-    AVVulkanDeviceContext *vk_dev;
-    AVHWDeviceContext *device_ctx;
+    int err, qf, cxpos = 0, cypos = 0, nb_q = 0;
+    VkResult ret;
+    FFVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
+    FFVulkanDecodeShared *ctx;
+    FFVulkanContext *s;
+    FFVulkanFunctions *vk;
 
-    avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
-    frames_ctx = (AVHWFramesContext *)avctx->hw_frames_ctx->data;
+    VkSamplerYcbcrConversionCreateInfo yuv_sampler_info = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
+        .components = ff_comp_identity_map,
+        .ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+        .ycbcrRange = avctx->color_range == AVCOL_RANGE_MPEG, /* Ignored */
+    };
 
-    av_log(avctx, AV_LOG_INFO, "STARTING INIT\n");
-
-    frames_ctx->format    = AV_PIX_FMT_VULKAN;
-    frames_ctx->sw_format = avctx->pix_fmt;
-    frames_ctx->width     = 1920;
-    frames_ctx->height    = 1080;
-    // frames_ctx->width     = d_ctx->seq.width;
-    // frames_ctx->height    = d_ctx->seq.height;
-
-    err = av_hwframe_ctx_init(avctx->hw_frames_ctx);
-    if (err < 0) {
-        av_buffer_unref(&avctx->hw_frames_ctx);
+    av_log(avctx, AV_LOG_INFO, "INIT IN PROGRESS\n");
+    err = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_VULKAN);
+    if (err < 0)
         return err;
-    }
 
-    device_ctx = (AVHWDeviceContext *)frames_ctx->device_ref->data;
-    vk_dev = device_ctx->hwctx;
-
-    s->extensions = ff_vk_extensions_to_mask(vk_dev->enabled_dev_extensions,
-                                             vk_dev->nb_enabled_dev_extensions);
-
-    err = ff_vk_load_functions(device_ctx, &s->vkfn, s->extensions, 1, 1);
-    if (err < 0) {
-        av_buffer_unref(&avctx->hw_frames_ctx);
-        return err;
-    }
+    /* Initialize contexts */
+    ctx = dec->shared_ctx;
+    s = &ctx->s;
+    vk = &ctx->s.vkfn;
 
     s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
     s->frames = (AVHWFramesContext *)s->frames_ref->data;
     s->hwfc = s->frames->hwctx;
+
     s->device = (AVHWDeviceContext *)s->frames->device_ref->data;
     s->hwctx = s->device->hwctx;
 
-    RET(ff_vk_load_props(s));
+    err = ff_vk_load_props(s);
+    if (err < 0)
+        goto fail;
 
-    av_log(avctx, AV_LOG_INFO, "This fine?\n");
+    /* Create queue context */
+    qf = ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_COMPUTE_BIT);
 
-    ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_COMPUTE_BIT);
-    RET(ff_vk_exec_pool_init(s, &ctx->qf, &ctx->e, ctx->qf.nb_queues * 4, 0, 0, 0,
-                           NULL));
-    RET(ff_vk_init_sampler(s, &ctx->sampler, 1, VK_FILTER_LINEAR));
+    if (s->query_props[qf].queryResultStatusSupport)
+        nb_q = 1;
 
-    spv = ff_vk_spirv_init();
-    if (!spv) {
-        av_log(avctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
-        return AVERROR_EXTERNAL;
+    /* Create decode exec context for this specific main thread.
+     * 2 async contexts per thread was experimentally determined to be optimal
+     * for a majority of streams. */
+    err = ff_vk_exec_pool_init(s, &ctx->qf, &dec->exec_pool, 2,
+                               nb_q, 0, 0,
+                               NULL);
+    if (err < 0)
+        goto fail;
+
+    /* Get sampler */
+    av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
+    yuv_sampler_info.xChromaOffset = cxpos >> 7;
+    yuv_sampler_info.yChromaOffset = cypos >> 7;
+    yuv_sampler_info.format = s->hwfc->format[0];
+    ret = vk->CreateSamplerYcbcrConversion(s->hwctx->act_dev, &yuv_sampler_info,
+                                           s->hwctx->alloc, &ctx->yuv_sampler);
+    if (ret != VK_SUCCESS) {
+        err = AVERROR_EXTERNAL;
+        goto fail;
     }
 
-    // init_quant_shd
+    ff_vk_decode_flush(avctx);
 
-    spv->uninit(&spv);
+    av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
+
     return 0;
+
 fail:
-    spv->uninit(&spv);
     ff_vk_decode_uninit(avctx);
+
     return err;
+}
+
+static void free_common(FFRefStructOpaque unused, void *obj)
+{
+    FFVulkanDecodeShared *ctx = obj;
+    FFVulkanContext *s = &ctx->s;
+    FFVulkanFunctions *vk = &ctx->s.vkfn;
+
+    /* Destroy layered view */
+    if (ctx->layered_view)
+        vk->DestroyImageView(s->hwctx->act_dev, ctx->layered_view, s->hwctx->alloc);
+
+    /* This also frees all references from this pool */
+    av_frame_free(&ctx->layered_frame);
+    av_buffer_unref(&ctx->dpb_hwfc_ref);
+
+    /* Destroy parameters */
+    if (ctx->empty_session_params)
+        vk->DestroyVideoSessionParametersKHR(s->hwctx->act_dev,
+                                             ctx->empty_session_params,
+                                             s->hwctx->alloc);
+
+    ff_vk_video_common_uninit(s, &ctx->common);
+
+    if (ctx->yuv_sampler)
+        vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev, ctx->yuv_sampler,
+                                          s->hwctx->alloc);
+
+    ff_vk_uninit(s);
+}
+
+static int vulkan_decode_bootstrap(AVCodecContext *avctx, AVBufferRef *frames_ref)
+{
+    int err;
+    FFVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
+    AVHWFramesContext *frames = (AVHWFramesContext *)frames_ref->data;
+    AVHWDeviceContext *device = (AVHWDeviceContext *)frames->device_ref->data;
+    AVVulkanDeviceContext *hwctx = device->hwctx;
+    FFVulkanDecodeShared *ctx;
+
+    if (dec->shared_ctx)
+        return 0;
+
+    dec->shared_ctx = ff_refstruct_alloc_ext(sizeof(*ctx), 0, NULL,
+                                             free_common);
+    if (!dec->shared_ctx)
+        return AVERROR(ENOMEM);
+
+    ctx = dec->shared_ctx;
+
+    ctx->s.extensions = ff_vk_extensions_to_mask(hwctx->enabled_dev_extensions,
+                                                 hwctx->nb_enabled_dev_extensions);
+
+    if (!(ctx->s.extensions & FF_VK_EXT_VIDEO_DECODE_QUEUE)) {
+        av_log(avctx, AV_LOG_ERROR, "Device does not support the %s extension!\n",
+               VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME);
+        ff_refstruct_unref(&dec->shared_ctx);
+        return AVERROR(ENOSYS);
+    }
+
+    err = ff_vk_load_functions(device, &ctx->s.vkfn, ctx->s.extensions, 1, 1);
+    if (err < 0) {
+        ff_refstruct_unref(&dec->shared_ctx);
+        return err;
+    }
+
+    return 0;
 }
 
 static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
 {
-    return 0;
+    int err;
+    VkFormat vkfmt;
+    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)hw_frames_ctx->data;
+    AVVulkanFramesContext *hwfc = frames_ctx->hwctx;
+    DiracContext *s = avctx->priv_data;
+
+    frames_ctx->sw_format = avctx->pix_fmt;
+    // frames_ctx->sw_format = AV_PIX_FMT_NONE;
+
+    err = vulkan_decode_bootstrap(avctx, hw_frames_ctx);
+    if (err < 0)
+        return err;
+
+    frames_ctx->width  = s->seq.width;
+    frames_ctx->height = s->seq.height;
+    frames_ctx->format = AV_PIX_FMT_VULKAN;
+
+    hwfc->format[0]    = vkfmt;
+    hwfc->tiling       = VK_IMAGE_TILING_OPTIMAL;
+    hwfc->usage        = VK_IMAGE_USAGE_TRANSFER_SRC_BIT         |
+                         VK_IMAGE_USAGE_SAMPLED_BIT              |
+                         VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR;
+
+    return err;
 }
 
 const FFHWAccel ff_dirac_vulkan_hwaccel = {
@@ -245,14 +303,14 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     // .decode_slice          = &vk_av1_decode_slice,
     // .end_frame             = &vk_av1_end_frame,
     // .free_frame_priv       = &vk_av1_free_frame_priv,
-    .init                  = &vulkan_dirac_init,
-    // .update_thread_context = &ff_vk_update_thread_context,
-    // .decode_params         = &ff_vk_params_invalidate,
-    // .flush                 = &ff_vk_decode_flush,
-    .uninit                = &vulkan_dirac_uninit,
-    .frame_params          = &vulkan_dirac_frame_params,
     .frame_priv_data_size  = sizeof(DiracVulkanDecodePicture),
-    .priv_data_size        = sizeof(DiracVulkanDecodeContext),
+    .init                  = &vulkan_dirac_init,
+    .update_thread_context = &ff_vk_update_thread_context,
+    .decode_params         = &ff_vk_params_invalidate,
+    .flush                 = &ff_vk_decode_flush,
+    .uninit                = &ff_vk_decode_uninit,
+    .frame_params          = &vulkan_dirac_frame_params,
+    .priv_data_size        = sizeof(FFVulkanDecodeContext),
 
     /* NOTE: Threading is intentionally disabled here. Due to the design of Vulkan,
      * where frames are opaque to users, and mostly opaque for driver developers,
@@ -263,6 +321,6 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
      * The current implementation tracks the index for the driver and submits it
      * as necessary information. Due to needing to modify the decoding context,
      * which is not thread-safe, on frame free, threading is disabled. */
-    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
-    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
+    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
+    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
 };
