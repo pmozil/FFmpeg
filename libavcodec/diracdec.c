@@ -1958,6 +1958,12 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         pix_fmt = ff_get_format(s->avctx, pix_fmts);
         avctx->pix_fmt         = pix_fmt;
+
+        if (pix_fmt < 0) {
+            av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
+            return AVERROR(EINVAL);
+        }
+
         av_freep(&dsh);
 
         s->pshift = s->bit_depth > 8;
@@ -1967,11 +1973,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
                                                &s->chroma_y_shift);
         if (ret < 0)
             return ret;
-
-        if (pix_fmt < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
-            return AVERROR(EINVAL);
-        }
 
         ret = alloc_sequence_buffers(s);
         if (ret < 0)

@@ -187,8 +187,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
         goto fail;
     }
 
-    ff_vk_decode_flush(avctx);
-
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
     return 0;
@@ -272,17 +270,15 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
     VkFormat vkfmt;
     AVHWFramesContext *frames_ctx = (AVHWFramesContext*)hw_frames_ctx->data;
     AVVulkanFramesContext *hwfc = frames_ctx->hwctx;
-    DiracContext *s = avctx->priv_data;
 
     frames_ctx->sw_format = avctx->pix_fmt;
-    // frames_ctx->sw_format = AV_PIX_FMT_NONE;
 
     err = vulkan_decode_bootstrap(avctx, hw_frames_ctx);
     if (err < 0)
         return err;
 
-    frames_ctx->width  = s->seq.width;
-    frames_ctx->height = s->seq.height;
+    frames_ctx->width  = avctx->coded_width;
+    frames_ctx->height = avctx->coded_height;
     frames_ctx->format = AV_PIX_FMT_VULKAN;
 
     hwfc->format[0]    = vkfmt;
@@ -299,28 +295,17 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_DIRAC,
     .p.pix_fmt             = AV_PIX_FMT_VULKAN,
-    // .start_frame           = &vk_av1_start_frame,
-    // .decode_slice          = &vk_av1_decode_slice,
-    // .end_frame             = &vk_av1_end_frame,
-    // .free_frame_priv       = &vk_av1_free_frame_priv,
-    .frame_priv_data_size  = sizeof(DiracVulkanDecodePicture),
+    // .start_frame           = &vk_h264_start_frame,
+    // .decode_slice          = &vk_h264_decode_slice,
+    // .end_frame             = &vk_h264_end_frame,
+    // .free_frame_priv       = &vk_h264_free_frame_priv,
     .init                  = &vulkan_dirac_init,
-    .update_thread_context = &ff_vk_update_thread_context,
-    .decode_params         = &ff_vk_params_invalidate,
-    .flush                 = &ff_vk_decode_flush,
-    .uninit                = &ff_vk_decode_uninit,
     .frame_params          = &vulkan_dirac_frame_params,
+    .frame_priv_data_size  = sizeof(DiracVulkanDecodePicture),
+    // .update_thread_context = &ff_vk_update_thread_context,
+    // .decode_params         = &ff_vk_params_invalidate,
+    // .flush                 = &ff_vk_decode_flush,
+    .uninit                = &ff_vk_decode_uninit,
     .priv_data_size        = sizeof(FFVulkanDecodeContext),
-
-    /* NOTE: Threading is intentionally disabled here. Due to the design of Vulkan,
-     * where frames are opaque to users, and mostly opaque for driver developers,
-     * there's an issue with current hardware accelerator implementations of AV1,
-     * where they require an internal index. With regular hwaccel APIs, this index
-     * is given to users as an opaque handle directly. With Vulkan, due to increased
-     * flexibility, this index cannot be present anywhere.
-     * The current implementation tracks the index for the driver and submits it
-     * as necessary information. Due to needing to modify the decoding context,
-     * which is not thread-safe, on frame free, threading is disabled. */
-    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
-    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
+    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
 };
