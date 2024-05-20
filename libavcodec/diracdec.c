@@ -1745,19 +1745,19 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
 {
     int ret, i;
     int chroma_x_shift, chroma_y_shift;
-    enum AVPixelFormat pix_fmts[] = {
-#if CONFIG_DIRAC_VULKAN_HWACCEL
-        AV_PIX_FMT_VULKAN,
-#endif
-        avctx->pix_fmt,
-        AV_PIX_FMT_NONE,
-    };
-    enum AVPixelFormat pix_fmt = ff_get_format(avctx, pix_fmts);
-    if (pix_fmt < 0) {
-        av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
-        return AVERROR(EINVAL);
-    }
-    avctx->pix_fmt = pix_fmt;
+//     enum AVPixelFormat pix_fmts[] = {
+// #if CONFIG_DIRAC_VULKAN_HWACCEL
+//         AV_PIX_FMT_VULKAN,
+// #endif
+//         avctx->pix_fmt,
+//         AV_PIX_FMT_NONE,
+//     };
+    // enum AVPixelFormat pix_fmt = ff_get_format(avctx, pix_fmts);
+    // if (pix_fmt < 0) {
+    //     av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
+    //     return AVERROR(EINVAL);
+    // }
+    // avctx->pix_fmt = pix_fmt;
 
     ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift,
                                            &chroma_y_shift);
@@ -1961,8 +1961,8 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
             return AVERROR(EINVAL);
         }
-        // avctx->pix_fmt         = dsh->pix_fmt;
-        avctx->pix_fmt         = pix_fmt;
+        avctx->pix_fmt         = dsh->pix_fmt;
+        // avctx->pix_fmt         = pix_fmt;
         avctx->color_range     = dsh->color_range;
         avctx->color_trc       = dsh->color_trc;
         avctx->color_primaries = dsh->color_primaries;

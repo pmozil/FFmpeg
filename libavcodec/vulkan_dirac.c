@@ -17,14 +17,13 @@
  */
 
 #include "diracdec.h"
+#include "libavutil/vulkan_loader.h"
 #include "vulkan.h"
 #include "hwaccel_internal.h"
 #include "libavfilter/vulkan_spirv.h"
 #include "vulkan_decode.h"
 
 typedef  struct DiracVulkanDecodeContext {
-    DiracContext *dirac_ctx;
-
     FFVulkanContext vkctx;
     FFVkExecPool e;
     FFVkQueueFamilyCtx qf;
@@ -164,37 +163,63 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 {
     int err;
     DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
+    DiracContext *d_ctx = avctx->priv_data;
     FFVulkanContext *s = &ctx->vkctx;
     FFVkSPIRVCompiler *spv;
+    AVHWFramesContext *frames_ctx;
+    AVVulkanDeviceContext *vk_dev;
+    AVHWDeviceContext *device_ctx;
+
+    avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
+    frames_ctx = (AVHWFramesContext *)avctx->hw_frames_ctx->data;
 
     av_log(avctx, AV_LOG_INFO, "STARTING INIT\n");
-    err = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_VULKAN);
+
+    frames_ctx->format    = AV_PIX_FMT_VULKAN;
+    frames_ctx->sw_format = avctx->pix_fmt;
+    frames_ctx->width     = 1920;
+    frames_ctx->height    = 1080;
+    // frames_ctx->width     = d_ctx->seq.width;
+    // frames_ctx->height    = d_ctx->seq.height;
+
+    err = av_hwframe_ctx_init(avctx->hw_frames_ctx);
     if (err < 0) {
-        av_log(avctx, AV_LOG_ERROR, "Could not create hardware frame context\n");
+        av_buffer_unref(&avctx->hw_frames_ctx);
         return err;
     }
+
+    device_ctx = (AVHWDeviceContext *)frames_ctx->device_ref->data;
+    vk_dev = device_ctx->hwctx;
+
+    s->extensions = ff_vk_extensions_to_mask(vk_dev->enabled_dev_extensions,
+                                             vk_dev->nb_enabled_dev_extensions);
+
+    err = ff_vk_load_functions(device_ctx, &s->vkfn, s->extensions, 1, 1);
+    if (err < 0) {
+        av_buffer_unref(&avctx->hw_frames_ctx);
+        return err;
+    }
+
+    s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
+    s->frames = (AVHWFramesContext *)s->frames_ref->data;
+    s->hwfc = s->frames->hwctx;
+    s->device = (AVHWDeviceContext *)s->frames->device_ref->data;
+    s->hwctx = s->device->hwctx;
+
+    RET(ff_vk_load_props(s));
+
     av_log(avctx, AV_LOG_INFO, "This fine?\n");
+
+    ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_COMPUTE_BIT);
+    RET(ff_vk_exec_pool_init(s, &ctx->qf, &ctx->e, ctx->qf.nb_queues * 4, 0, 0, 0,
+                           NULL));
+    RET(ff_vk_init_sampler(s, &ctx->sampler, 1, VK_FILTER_LINEAR));
 
     spv = ff_vk_spirv_init();
     if (!spv) {
         av_log(avctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
         return AVERROR_EXTERNAL;
     }
-
-    // ff_vk_decode_init()
-
-    s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
-    s->frames = (AVHWFramesContext *)s->frames_ref->data;
-    s->hwfc = s->frames->hwctx;
-
-    s->device = (AVHWDeviceContext *)s->frames->device_ref->data;
-    s->hwctx = s->device->hwctx;
-
-    RET(ff_vk_load_props(s));
-    ff_vk_qf_init(s, &ctx->qf, VK_QUEUE_COMPUTE_BIT);
-    RET(ff_vk_exec_pool_init(s, &ctx->qf, &ctx->e, ctx->qf.nb_queues * 4, 0, 0, 0,
-                           NULL));
-    RET(ff_vk_init_sampler(s, &ctx->sampler, 1, VK_FILTER_LINEAR));
 
     // init_quant_shd
 
@@ -204,6 +229,11 @@ fail:
     spv->uninit(&spv);
     ff_vk_decode_uninit(avctx);
     return err;
+}
+
+static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
+{
+    return 0;
 }
 
 const FFHWAccel ff_dirac_vulkan_hwaccel = {
@@ -220,7 +250,7 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     // .decode_params         = &ff_vk_params_invalidate,
     // .flush                 = &ff_vk_decode_flush,
     .uninit                = &vulkan_dirac_uninit,
-    // .frame_params          = &ff_vk_frame_params,
+    .frame_params          = &vulkan_dirac_frame_params,
     .frame_priv_data_size  = sizeof(DiracVulkanDecodePicture),
     .priv_data_size        = sizeof(DiracVulkanDecodeContext),
 
