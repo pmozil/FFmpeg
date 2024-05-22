@@ -17,10 +17,10 @@
  */
 
 #include "diracdec.h"
-#include "libavutil/vulkan_loader.h"
 #include "vulkan.h"
-#include "libavfilter/vulkan_spirv.h"
 #include "vulkan_decode.h"
+#include "libavfilter/vulkan_spirv.h"
+#include "libavutil/vulkan_loader.h"
 
 typedef  struct DiracVulkanDecodeContext {
     FFVulkanContext vkctx;
@@ -43,27 +43,27 @@ typedef  struct DiracVulkanDecodePicture {
 } DiracVulkanDecodePicture;
 
 static const char dequant_16bit[] = {
-    C(0, void dequant_16bit(int idx) {                  )
-    C(1,     int16_t val = inBuffer[idx];               )
-    C(1,     if (val < 0) {                             )
-    C(2,         val = -(((-c)*q_fact + q_shift) >> 2); )
-    C(1,     } else if (val > 0) {                      )
-    C(2,         val = ((c*q_fact + q_shift) >> 2);     )
-    C(1,     }                                          )
-    C(1,     outBuffer[idx] = val;                      )
-    C(0, }                                              )
+    C(0, void dequant_16bit(int idx, int16_t qf, int16_t qs) {     )
+    C(1,     int16_t val = inBuffer[idx];                          )
+    C(1,     if (val < 0) {                                        )
+    C(2,         val = -(((-val)*qf + qs) >> int16_t(2));          )
+    C(1,     } else if (val > 0) {                                 )
+    C(2,         val = ((val*qf + qs) >> int16_t(2));              )
+    C(1,     }                                                     )
+    C(1,     outBuffer[idx] = val;                                 )
+    C(0, }                                                         )
 };
 
 static const char dequant_32bit[] = {
-    C(0, void dequant_32bit(int idx) {                  )
-    C(1,     int32_t val = inBuffer[idx];               )
-    C(1,     if (val < 0) {                             )
-    C(2,         val = -(((-c)*q_fact + q_shift) >> 2); )
-    C(1,     } else if (val > 0) {                      )
-    C(2,         val = ((c*q_fact + q_shift) >> 2);     )
-    C(1,     }                                          )
-    C(1,     outBuffer[idx] = val;                      )
-    C(0, }                                              )
+    C(0, void dequant_32bit(int idx, int32_t qf, int32_t qs) {     )
+    C(1,     int32_t val = inBuffer[idx];                          )
+    C(1,     if (val < 0) {                                        )
+    C(2,         val = -(((-val)*qf + qs) >> int32_t(2));          )
+    C(1,     } else if (val > 0) {                                 )
+    C(2,         val = ((val*qf + qs) >> int32_t(2));              )
+    C(1,     }                                                     )
+    C(1,     outBuffer[idx] = val;                                 )
+    C(0, }                                                         )
 };
 
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int idx)
@@ -73,7 +73,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, i
     size_t spv_len;
     void *spv_opaque = NULL;
 
-    // FFVulkanDecodeShared *sh = s->ctx->shared_ctx;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVkSPIRVShader *shd = &s->quant_shd[idx];
     FFVulkanPipeline *pl = &s->quant_pl[idx];
@@ -108,16 +107,24 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, i
     ff_vk_add_push_constant(pl, 0, sizeof(SliceCoeffsPuchConst), VK_SHADER_STAGE_COMPUTE_BIT);
     RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
 
+    if (idx)
+    {
+        GLSLD(dequant_32bit);
+    } else
+    {
+        GLSLD(dequant_16bit);
+    }
 
     GLSLC(0, void main()                          );
     GLSLC(0, {                                    );
     GLSLC(1,     for(int i = 0; i < tot; i++) {   );
     if (idx) {
-        GLSLC(2,      dequant_32bit(i);           );
+        GLSLC(2,      dequant_32bit(i, int32_t(q_fact), int32_t(q_shift)););
     } else {
-        GLSLC(2,      dequant_16bit(i);           );
+        GLSLC(2,      dequant_16bit(i, int16_t(q_fact), int16_t(q_shift)););
     }
-    GLSLC(1, }                                    );
+    GLSLC(1,     }                                );
+    GLSLC(0, }                                    );
 
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
     RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
@@ -137,11 +144,18 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx) {
 
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
-    int err, qf, cxpos = 0, cypos = 0, nb_q = 0;
+    int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
     VkResult ret;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s;
     FFVulkanFunctions *vk;
+    FFVkSPIRVCompiler *spv;
+
+    spv = ff_vk_spirv_init();
+    if (!spv) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to initialize SPIR-V compiler!\n");
+        return AVERROR_EXTERNAL;
+    }
 
     VkSamplerYcbcrConversionCreateInfo yuv_sampler_info = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
@@ -152,7 +166,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     err = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_VULKAN);
     if (err < 0)
-        return err;
+        goto fail;
 
     /* Initialize contexts */
     s = &dec->vkctx;
@@ -196,11 +210,16 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     //     goto fail;
     // }
 
+    init_quant_shd(dec, spv, 0);
+    init_quant_shd(dec, spv, 1);
+
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
-    return 0;
-
 fail:
+    if (spv)
+    {
+        spv->uninit(&spv);
+    }
     vulkan_dirac_uninit(avctx);
 
     return err;
