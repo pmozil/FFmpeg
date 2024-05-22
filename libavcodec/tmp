@@ -1,0 +1,890 @@
+aliaspixdec.c:84:            out_buf = f->data[0] + f->linesize[0] * y++;
+asvdec.c:216:    int linesize = frame->linesize[0];
+asvdec.c:218:    uint8_t *dest_y  = frame->data[0] + (mb_y * 16 * linesize)           + mb_x * 16;
+asvdec.c:219:    uint8_t *dest_cb = frame->data[1] + (mb_y *  8 * frame->linesize[1]) + mb_x *  8;
+asvdec.c:220:    uint8_t *dest_cr = frame->data[2] + (mb_y *  8 * frame->linesize[2]) + mb_x *  8;
+asvdec.c:222:    a->idsp.idct_put(dest_y,                    linesize, block[0]);
+asvdec.c:223:    a->idsp.idct_put(dest_y + 8,                linesize, block[1]);
+asvdec.c:224:    a->idsp.idct_put(dest_y + 8 * linesize,     linesize, block[2]);
+asvdec.c:225:    a->idsp.idct_put(dest_y + 8 * linesize + 8, linesize, block[3]);
+asvdec.c:228:        a->idsp.idct_put(dest_cb, frame->linesize[1], block[4]);
+asvdec.c:229:        a->idsp.idct_put(dest_cr, frame->linesize[2], block[5]);
+avcodec.h:1161:     * - linesize[]
+avcodec.h:1196:     * Some decoders do not support linesizes changing between frames.
+avcodec.h:1214:     * linesize. In AVFrame.linesize, only linesize[0] may be set for audio
+avcodec.h:2209:     * data+linesize for the bitmap of this subtitle.
+avcodec.h:2213:    int linesize[4];
+avcodec.h:2433: * line sizes are a multiple of the respective linesize_align[i].
+avcodec.h:2438:                               int linesize_align[AV_NUM_DATA_POINTERS]);
+avcodec.h:3009: * Fill AVFrame audio data and linesize pointers.
+avcodec.h:3021: *                    frame->extended_data, frame->linesize[0].
+avrndec.c:76:            memcpy(p->data[0] + (y+ a->tff)*p->linesize[0], buf                             , 2*avctx->width);
+avrndec.c:77:            memcpy(p->data[0] + (y+!a->tff)*p->linesize[0], buf + avctx->width*true_height+4, 2*avctx->width);
+avrndec.c:83:            memcpy(p->data[0] + y*p->linesize[0], buf, 2*avctx->width);
+avuidec.c:86:            y = pic->data[0] + (1 - i) * pic->linesize[0];
+avuidec.c:87:            u = pic->data[1] + (1 - i) * pic->linesize[1];
+avuidec.c:88:            v = pic->data[2] + (1 - i) * pic->linesize[2];
+avuidec.c:89:            a = pic->data[3] + (1 - i) * pic->linesize[3];
+avuidec.c:91:            y = pic->data[0] + i * pic->linesize[0];
+avuidec.c:92:            u = pic->data[1] + i * pic->linesize[1];
+avuidec.c:93:            v = pic->data[2] + i * pic->linesize[2];
+avuidec.c:94:            a = pic->data[3] + i * pic->linesize[3];
+avuidec.c:109:            y += (interlaced + 1) * pic->linesize[0];
+avuidec.c:110:            u += (interlaced + 1) * pic->linesize[1];
+avuidec.c:111:            v += (interlaced + 1) * pic->linesize[2];
+avuidec.c:112:            a += (interlaced + 1) * pic->linesize[3];
+bitpacked_dec.c:52:    ret = av_image_fill_arrays(frame->data, frame->linesize, avpkt->data,
+bitpacked_dec.c:83:        y = (uint16_t*)(frame->data[0] + i * frame->linesize[0]);
+bitpacked_dec.c:84:        u = (uint16_t*)(frame->data[1] + i * frame->linesize[1]);
+bitpacked_dec.c:85:        v = (uint16_t*)(frame->data[2] + i * frame->linesize[2]);
+cavsdec.c:1034:        int alloc_size = FFALIGN(FFABS(h->cur.f->linesize[0]) + 32, 32);
+cinepakenc.c:562:                decode_v1_vector(s, sub_scratch_data, sub_scratch_linesize,
+cinepakenc.c:565:                decode_v4_vector(s, sub_scratch_data, sub_scratch_linesize,
+cinepakenc.c:791:                decode_v1_vector(s, vq_data, vq_linesize, mb->v1_vector, info);
+cinepakenc.c:800:                decode_v4_vector(s, vq_data, vq_linesize, mb->v4_vector, info);
+cljrdec.c:59:        uint8_t *luma = &p->data[0][y * p->linesize[0]];
+cljrdec.c:60:        uint8_t *cb   = &p->data[1][y * p->linesize[1]];
+cljrdec.c:61:        uint8_t *cr   = &p->data[2][y * p->linesize[2]];
+cuviddec.c:566:                    .dstPitch      = frame->linesize[i],
+cuviddec.c:568:                    .WidthInBytes  = FFMIN(pitch, frame->linesize[i]),
+cuviddec.c:611:                tmp_frame->linesize[i] = pitch;
+dds.c:638:        ctx->dec.stride = frame->linesize[0];
+dnxhddec.c:495:    int dct_linesize_luma   = frame->linesize[0];
+dnxhddec.c:496:    int dct_linesize_chroma = frame->linesize[1];
+dnxhddec.c:538:        dct_linesize_luma   <<= 1;
+dnxhddec.c:539:        dct_linesize_chroma <<= 1;
+dnxhddec.c:542:    dest_y = frame->data[0] + ((y * dct_linesize_luma)   << 4) + (x << (4 + shift1));
+dnxhddec.c:543:    dest_u = frame->data[1] + ((y * dct_linesize_chroma) << 4) + (x << (3 + shift1 + ctx->is_444));
+dnxhddec.c:544:    dest_v = frame->data[2] + ((y * dct_linesize_chroma) << 4) + (x << (3 + shift1 + ctx->is_444));
+dnxhddec.c:547:        dest_y += frame->linesize[0];
+dnxhddec.c:548:        dest_u += frame->linesize[1];
+dnxhddec.c:549:        dest_v += frame->linesize[2];
+dnxhddec.c:552:        dct_linesize_luma   <<= 1;
+dnxhddec.c:553:        dct_linesize_chroma <<= 1;
+dnxhddec.c:556:    dct_y_offset = interlaced_mb ? frame->linesize[0] : (dct_linesize_luma << 3);
+dnxhddec.c:559:        ctx->idsp.idct_put(dest_y,                               dct_linesize_luma, row->blocks[0]);
+dnxhddec.c:560:        ctx->idsp.idct_put(dest_y + dct_x_offset,                dct_linesize_luma, row->blocks[1]);
+dnxhddec.c:561:        ctx->idsp.idct_put(dest_y + dct_y_offset,                dct_linesize_luma, row->blocks[4]);
+dnxhddec.c:562:        ctx->idsp.idct_put(dest_y + dct_y_offset + dct_x_offset, dct_linesize_luma, row->blocks[5]);
+dnxhddec.c:565:            dct_y_offset = interlaced_mb ? frame->linesize[1] : (dct_linesize_chroma << 3);
+dnxhddec.c:566:            ctx->idsp.idct_put(dest_u,                dct_linesize_chroma, row->blocks[2]);
+dnxhddec.c:567:            ctx->idsp.idct_put(dest_v,                dct_linesize_chroma, row->blocks[3]);
+dnxhddec.c:568:            ctx->idsp.idct_put(dest_u + dct_y_offset, dct_linesize_chroma, row->blocks[6]);
+dnxhddec.c:569:            ctx->idsp.idct_put(dest_v + dct_y_offset, dct_linesize_chroma, row->blocks[7]);
+dnxhddec.c:572:        ctx->idsp.idct_put(dest_y,                               dct_linesize_luma, row->blocks[0]);
+dnxhddec.c:573:        ctx->idsp.idct_put(dest_y + dct_x_offset,                dct_linesize_luma, row->blocks[1]);
+dnxhddec.c:574:        ctx->idsp.idct_put(dest_y + dct_y_offset,                dct_linesize_luma, row->blocks[6]);
+dnxhddec.c:575:        ctx->idsp.idct_put(dest_y + dct_y_offset + dct_x_offset, dct_linesize_luma, row->blocks[7]);
+dnxhddec.c:578:            dct_y_offset = interlaced_mb ? frame->linesize[1] : (dct_linesize_chroma << 3);
+dnxhddec.c:579:            ctx->idsp.idct_put(dest_u,                               dct_linesize_chroma, row->blocks[2]);
+dnxhddec.c:580:            ctx->idsp.idct_put(dest_u + dct_x_offset,                dct_linesize_chroma, row->blocks[3]);
+dnxhddec.c:581:            ctx->idsp.idct_put(dest_u + dct_y_offset,                dct_linesize_chroma, row->blocks[8]);
+dnxhddec.c:582:            ctx->idsp.idct_put(dest_u + dct_y_offset + dct_x_offset, dct_linesize_chroma, row->blocks[9]);
+dnxhddec.c:583:            ctx->idsp.idct_put(dest_v,                               dct_linesize_chroma, row->blocks[4]);
+dnxhddec.c:584:            ctx->idsp.idct_put(dest_v + dct_x_offset,                dct_linesize_chroma, row->blocks[5]);
+dnxhddec.c:585:            ctx->idsp.idct_put(dest_v + dct_y_offset,                dct_linesize_chroma, row->blocks[10]);
+dnxhddec.c:586:            ctx->idsp.idct_put(dest_v + dct_y_offset + dct_x_offset, dct_linesize_chroma, row->blocks[11]);
+dvbsubdec.c:671:    ptrdiff_t stride = rect->linesize[0];
+dvbsubdec.c:801:            rect->linesize[0] = region->width;
+dvdec.c:398:    int y_stride, linesize;
+dvdec.c:555:            y_stride = (s->frame->linesize[0] <<
+dvdec.c:561:                   ((mb_y * s->frame->linesize[0] + mb_x) << log2_blocksize);
+dvdec.c:563:            dv100_idct_put_last_row_field_luma(s, y_ptr, s->frame->linesize[0], block);
+dvdec.c:565:            linesize = s->frame->linesize[0] << is_field_mode[mb_index];
+dvdec.c:566:            mb[0].idct_put(y_ptr, linesize, block + 0 * 64);
+dvdec.c:568:                mb[2].idct_put(y_ptr + (1 << log2_blocksize),            linesize, block + 2 * 64);
+dvdec.c:570:                mb[1].idct_put(y_ptr + (1 << log2_blocksize),            linesize, block + 1 * 64);
+dvdec.c:571:                mb[2].idct_put(y_ptr                         + y_stride, linesize, block + 2 * 64);
+dvdec.c:572:                mb[3].idct_put(y_ptr + (1 << log2_blocksize) + y_stride, linesize, block + 3 * 64);
+dvdec.c:579:        c_offset = (((mb_y >>  (s->sys->pix_fmt == AV_PIX_FMT_YUV420P)) * s->frame->linesize[1] +
+dvdec.c:589:                for (y = 0; y < (1 << log2_blocksize); y++, c_ptr += s->frame->linesize[j], pixels += 8) {
+dvdec.c:591:                    c_ptr1 = c_ptr + (s->frame->linesize[j] << log2_blocksize);
+dvdec.c:601:                    s->frame->linesize[j] << ((!is_field_mode[mb_index]) * log2_blocksize);
+dvdec.c:603:                    dv100_idct_put_last_row_field_chroma(s, c_ptr, s->frame->linesize[j], block);
+dvdec.c:607:                    linesize = s->frame->linesize[j] << is_field_mode[mb_index];
+dvdec.c:608:                    (mb++)->idct_put(c_ptr, linesize, block);
+dvdec.c:611:                        (mb++)->idct_put(c_ptr + y_stride, linesize, block);
+dvdsubdec.c:100:static int decode_rle(uint8_t *bitmap, int linesize, int w, int h, uint8_t used_color[256],
+dvdsubdec.c:137:            d += linesize;
+dvdsubdec.c:410:                sub_header->rects[0]->linesize[0] = w;
+dvdsubdec.c:461:    while (y1 < s->rects[0]->h && is_transp(s->rects[0]->data[0] + y1 * s->rects[0]->linesize[0],
+dvdsubdec.c:471:    while (y2 > 0 && is_transp(s->rects[0]->data[0] + y2 * s->rects[0]->linesize[0], 1,
+dvdsubdec.c:475:    while (x1 < (s->rects[0]->w - 1) && is_transp(s->rects[0]->data[0] + x1, s->rects[0]->linesize[0],
+dvdsubdec.c:479:    while (x2 > 0 && is_transp(s->rects[0]->data[0] + x2, s->rects[0]->linesize[0], s->rects[0]->h,
+dvdsubdec.c:488:        memcpy(bitmap + w * y, s->rects[0]->data[0] + x1 + (y1 + y) * s->rects[0]->linesize[0], w);
+dvdsubdec.c:492:    s->rects[0]->linesize[0] = w;
+dxa.c:313:        decode_13(avctx, c, frame->data[0], frame->linesize[0], srcptr, dsize, c->prev->data[0]);
+ffv1dec.c:339:        decode_plane(fs, p->data[0] + ps*x + y*p->linesize[0], width, height, p->linesize[0], 0, 1);
+ffv1dec.c:342:            decode_plane(fs, p->data[1] + ps*cx+cy*p->linesize[1], chroma_width, chroma_height, p->linesize[1], 1, 1);
+ffv1dec.c:343:            decode_plane(fs, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1, 1);
+ffv1dec.c:346:            decode_plane(fs, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], (f->version >= 4 && !f->chroma_planes) ? 1 : 2, 1);
+ffv1dec.c:348:         decode_plane(fs, p->data[0] + ps*x + y*p->linesize[0]    , width, height, p->linesize[0], 0, 2);
+ffv1dec.c:349:         decode_plane(fs, p->data[0] + ps*x + y*p->linesize[0] + 1, width, height, p->linesize[0], 1, 2);
+ffv1dec.c:351:        uint8_t *planes[4] = { p->data[0] + ps * x + y * p->linesize[0],
+ffv1dec.c:352:                               p->data[1] + ps * x + y * p->linesize[1],
+ffv1dec.c:353:                               p->data[2] + ps * x + y * p->linesize[2],
+ffv1dec.c:354:                               p->data[3] + ps * x + y * p->linesize[3] };
+ffv1dec.c:355:        decode_rgb_frame32(fs, planes, width, height, p->linesize);
+ffv1dec.c:357:        uint8_t *planes[4] = { p->data[0] + ps * x + y * p->linesize[0],
+ffv1dec.c:358:                               p->data[1] + ps * x + y * p->linesize[1],
+ffv1dec.c:359:                               p->data[2] + ps * x + y * p->linesize[2],
+ffv1dec.c:360:                               p->data[3] + ps * x + y * p->linesize[3] };
+ffv1dec.c:361:        decode_rgb_frame(fs, planes, width, height, p->linesize);
+ffv1dec.c:1006:                dst[j] = p->data[j] + p->linesize[j] *
+ffv1dec.c:1008:                src[j] = f->last_picture.f->data[j] + f->last_picture.f->linesize[j] *
+ffv1dec.c:1016:            av_image_copy(dst, p->linesize, src,
+ffv1dec.c:1017:                          f->last_picture.f->linesize,
+fitsdec.c:249:                dst = (type *) (p->data[map[k]] + (avctx->height - i - 1) * p->linesize[map[k]]); \
+fitsdec.c:279:            dst = (type *) (p->data[0] + (avctx->height-i-1)* p->linesize[0]); \
+fraps.c:286:            if ((ret = fraps2_decode_plane(s, f->data[i], f->linesize[i],
+fraps.c:300:            if ((ret = fraps2_decode_plane(s, f->data[0] + i + (f->linesize[0] * (avctx->height - 1)),
+gemdec.c:70:                p->data[0][ (state->y + y) * p->linesize[0] + (x * 8 + 7 - i) * pixel_size + pl_byte] |= !!(row[x] & (1 << i)) << pl_bit;
+gemdec.c:83:        memcpy(p->data[0] + (state->y + y) * p->linesize[0], row, avctx->width * pixel_size);
+gemdec.c:268:    memset(p->data[0], 0, avctx->height * p->linesize[0]);
+gifdec.c:90:    const ptrdiff_t linesize = picture->linesize[0];
+gifdec.c:99:        py += linesize;
+gifdec.c:105:    const ptrdiff_t linesize = picture->linesize[0];
+gifdec.c:106:    uint8_t *py = picture->data[0] + t * linesize;
+gifdec.c:112:        py += linesize;
+gifdec.c:117:                              ptrdiff_t src_linesize,
+gifdec.c:118:                              ptrdiff_t dst_linesize,
+gifdec.c:124:    src_py += t * src_linesize;
+gifdec.c:125:    dst_py += t * dst_linesize;
+gifdec.c:128:        src_py += src_linesize;
+gifdec.c:129:        dst_py += dst_linesize;
+gifdec.c:138:    ptrdiff_t linesize;
+gifdec.c:222:            FFABS(frame->linesize[0]), frame->linesize[0], s->gce_l, s->gce_t, s->gce_w, s->gce_h);
+gifdec.c:237:            av_fast_malloc(&s->stored_img, &s->stored_img_size, FFABS(frame->linesize[0]) * frame->height);
+gifdec.c:242:                frame->linesize[0], FFABS(frame->linesize[0]), left, top, pw, height);
+gifdec.c:259:    linesize = frame->linesize[0];
+gifdec.c:260:    ptr1 = (uint32_t *)(frame->data[0] + top * linesize) + left;
+gifdec.c:285:                ptr += linesize * 2;
+gifdec.c:289:                ptr += linesize * 1;
+gifdec.c:293:                ptr += linesize / 2;
+gifdec.c:298:                ptr = ptr1 + linesize / 4 * y1;
+gifdec.c:302:            ptr += linesize / 4;
+h263dec.c:670:                pict->data[p]     += (h - 1) * pict->linesize[p];
+h263dec.c:671:                pict->linesize[p] *= -1;
+h264dec.c:129:    offset[0] = y * src->linesize[0];
+h264dec.c:131:    offset[2] = (y >> vshift) * src->linesize[1];
+h264dec.c:796:            memcpy(sl->ref_list[0][0].linesize, h->last_pic_for_ec.f->linesize, sizeof(sl->ref_list[0][0].linesize));
+h264dec.c:960:            int linesizes[4];
+h264dec.c:966:                dst_data[p] = f->data[p] + (field^1)*f->linesize[p];
+h264dec.c:967:                src_data[p] = f->data[p] +  field   *f->linesize[p];
+h264dec.c:968:                linesizes[p] = 2*f->linesize[p];
+h264dec.c:971:            av_image_copy(dst_data, linesizes, src_data, linesizes,
+h264dec.h:163:    int linesize[3];
+h264dec.h:221:    ptrdiff_t linesize, uvlinesize;
+h264dec.h:222:    ptrdiff_t mb_linesize;  ///< may be equal to s->linesize or s->linesize * 2, for mbaff
+h264dec.h:223:    ptrdiff_t mb_uvlinesize;
+h264dec.h:626:                            unsigned int linesize, unsigned int uvlinesize);
+h264dec.h:629:                       unsigned int linesize, unsigned int uvlinesize);
+hapdec.c:326:        ctx->dec[t].stride = frame->linesize[0];
+hdrdec.c:141:        float *dst_r = (float *)(p->data[2] + y * p->linesize[2]);
+hdrdec.c:142:        float *dst_g = (float *)(p->data[0] + y * p->linesize[0]);
+hdrdec.c:143:        float *dst_b = (float *)(p->data[1] + y * p->linesize[1]);
+hdrdec.c:144:        uint8_t *scanline = p->data[0] + y * p->linesize[0];
+hdrdec.c:177:            uint8_t *scanline = p->data[0] + y * p->linesize[0] + i;
+hdrdec.c:206:            memcpy(rgbe, p->data[0] + y * p->linesize[0] + x * 4, 4);
+hevcdec.c:1255:                        ptrdiff_t stride = s->frame->linesize[1];
+hevcdec.c:1285:                        ptrdiff_t stride = s->frame->linesize[2];
+hevcdec.c:1499:    ptrdiff_t stride0 = s->frame->linesize[0];
+hevcdec.c:1500:    ptrdiff_t stride1 = s->frame->linesize[1];
+hevcdec.c:1501:    ptrdiff_t stride2 = s->frame->linesize[2];
+hevcdec.c:1557:    ptrdiff_t srcstride  = ref->linesize[0];
+hevcdec.c:1619:    ptrdiff_t src0stride  = ref0->linesize[0];
+hevcdec.c:1620:    ptrdiff_t src1stride  = ref1->linesize[0];
+hevcdec.c:1780:    ptrdiff_t src1stride = ref0->linesize[cidx+1];
+hevcdec.c:1781:    ptrdiff_t src2stride = ref1->linesize[cidx+1];
+hevcdec.c:1849:        s->hevcdsp.put_hevc_epel_bi[idx][!!my1][!!mx1](dst0, s->frame->linesize[cidx+1],
+hevcdec.c:1853:        s->hevcdsp.put_hevc_epel_bi_w[idx][!!my1][!!mx1](dst0, s->frame->linesize[cidx+1],
+hevcdec.c:1924:    &s->frame->data[c_idx][((y) >> s->ps.sps->vshift[c_idx]) * s->frame->linesize[c_idx] + \
+hevcdec.c:1989:        luma_mc_uni(lc, dst0, s->frame->linesize[0], ref0->frame,
+hevcdec.c:1995:            chroma_mc_uni(lc, dst1, s->frame->linesize[1], ref0->frame->data[1], ref0->frame->linesize[1],
+hevcdec.c:1998:            chroma_mc_uni(lc, dst2, s->frame->linesize[2], ref0->frame->data[2], ref0->frame->linesize[2],
+hevcdec.c:2008:        luma_mc_uni(lc, dst0, s->frame->linesize[0], ref1->frame,
+hevcdec.c:2014:            chroma_mc_uni(lc, dst1, s->frame->linesize[1], ref1->frame->data[1], ref1->frame->linesize[1],
+hevcdec.c:2018:            chroma_mc_uni(lc, dst2, s->frame->linesize[2], ref1->frame->data[2], ref1->frame->linesize[2],
+hevcdec.c:2028:        luma_mc_bi(lc, dst0, s->frame->linesize[0], ref0->frame,
+hevcdec.c:2033:            chroma_mc_bi(lc, dst1, s->frame->linesize[1], ref0->frame, ref1->frame,
+hevcdec.c:2036:            chroma_mc_bi(lc, dst2, s->frame->linesize[2], ref0->frame, ref1->frame,
+hevcdec.c:3265:                       FFMAX3(frame->linesize[0], frame->linesize[1],
+hevcdec.c:3266:                              frame->linesize[2]));
+hevcdec.c:3282:            const uint8_t *src = frame->data[i] + j * frame->linesize[i];
+huffyuvdec.c:883:    offset[0] = frame->linesize[0] * y;
+huffyuvdec.c:884:    offset[1] = frame->linesize[1] * cy;
+huffyuvdec.c:885:    offset[2] = frame->linesize[2] * cy;
+huffyuvdec.c:934:    fake_ystride = s->interlaced ? p->linesize[0] * 2 : p->linesize[0];
+huffyuvdec.c:935:    fake_ustride = s->interlaced ? p->linesize[1] * 2 : p->linesize[1];
+huffyuvdec.c:936:    fake_vstride = s->interlaced ? p->linesize[2] * 2 : p->linesize[2];
+huffyuvdec.c:959:                    uint8_t *dst = p->data[plane] + p->linesize[plane]*y;
+huffyuvdec.c:982:                    left = left_prediction(s, p->data[plane] + p->linesize[plane], s->temp[0], w, left);
+huffyuvdec.c:998:                    dst = p->data[plane] + p->linesize[plane] * y;
+huffyuvdec.c:1023:            p->data[2][0 + y_offset * p->linesize[2]] = get_bits(&s->gb, 8);
+huffyuvdec.c:1025:            p->data[0][1 + y_offset * p->linesize[0]] = get_bits(&s->gb, 8);
+huffyuvdec.c:1027:            p->data[1][0 + y_offset * p->linesize[1]] = get_bits(&s->gb, 8);
+huffyuvdec.c:1028:            p->data[0][0 + y_offset * p->linesize[0]] = get_bits(&s->gb, 8);
+huffyuvdec.c:1034:                lefty = s->llviddsp.add_left_pred(p->data[0] + p->linesize[0] * y_offset + 2, s->temp[0],
+huffyuvdec.c:1037:                    leftu = s->llviddsp.add_left_pred(p->data[1] + p->linesize[1] * y_offset + 1, s->temp[1], width2 - 1, leftu);
+huffyuvdec.c:1038:                    leftv = s->llviddsp.add_left_pred(p->data[2] + p->linesize[2] * y_offset + 1, s->temp[2], width2 - 1, leftv);
+huffyuvdec.c:1047:                        ydst = p->data[0] + p->linesize[0] * (y + y_offset);
+huffyuvdec.c:1062:                    ydst = p->data[0] + p->linesize[0] * (y  + y_offset);
+huffyuvdec.c:1063:                    udst = p->data[1] + p->linesize[1] * (cy + y_offset);
+huffyuvdec.c:1064:                    vdst = p->data[2] + p->linesize[2] * (cy + y_offset);
+huffyuvdec.c:1103:                    lefty = s->llviddsp.add_left_pred(p->data[0] + p->linesize[0],
+huffyuvdec.c:1106:                        leftu = s->llviddsp.add_left_pred(p->data[1] + p->linesize[2], s->temp[1], width2, leftu);
+huffyuvdec.c:1107:                        leftv = s->llviddsp.add_left_pred(p->data[2] + p->linesize[1], s->temp[2], width2, leftv);
+huffyuvdec.c:1145:                            ydst = p->data[0] + p->linesize[0] * y;
+huffyuvdec.c:1158:                    ydst = p->data[0] + p->linesize[0] * y;
+huffyuvdec.c:1159:                    udst = p->data[1] + p->linesize[1] * cy;
+huffyuvdec.c:1160:                    vdst = p->data[2] + p->linesize[2] * cy;
+huffyuvdec.c:1178:        const int last_line = (y_offset + height - 1) * p->linesize[0];
+huffyuvdec.c:1204:                    s->hdsp.add_hfyu_left_pred_bgr32(p->data[0] + p->linesize[0] * (y + y_offset),
+huffyuvdec.c:1210:                            s->llviddsp.add_bytes(p->data[0] + p->linesize[0] * (y + y_offset),
+huffyuvdec.c:1211:                                              p->data[0] + p->linesize[0] * (y + y_offset) +
+iff.c:619:static void decode_rgb8(GetByteContext *gb, uint8_t *dst, int width, int height, int linesize)
+iff.c:636:static void decode_rgbn(GetByteContext *gb, uint8_t *dst, int width, int height, int linesize)
+iff.c:656:static void decode_deep_rle32(uint8_t *dst, const uint8_t *src, int src_size, int width, int height, int linesize)
+iff.c:708:static void decode_deep_tvdc32(uint8_t *dst, const uint8_t *src, int src_size, int width, int height, int linesize, const int16_t *tvdc)
+iff.c:1724:                decode_deep_rle32(frame->data[0], buf, buf_size, avctx->width, avctx->height, frame->linesize[0]);
+iff.c:1772:            decode_rgb8(gb, frame->data[0], avctx->width, avctx->height, frame->linesize[0]);
+iff.c:1774:            decode_rgbn(gb, frame->data[0], avctx->width, avctx->height, frame->linesize[0]);
+iff.c:1781:                decode_deep_tvdc32(frame->data[0], buf, buf_size, avctx->width, avctx->height, frame->linesize[0], s->tvdc);
+interplayvideo.c:1050:                s->pixel_ptr = s->cur_decode_frame->data[0] + x + y * s->cur_decode_frame->linesize[0];
+intrax8.c:674:    // not parent codec linesize as this would be wrong for field pics
+jpeg2000dec.c:2006:            line = (PIXEL *)picture->data[plane] + y * (picture->linesize[plane] / sizeof(PIXEL));\
+jpeg2000dec.c:2033:                line += picture->linesize[plane] / sizeof(PIXEL);                                 \
+jpeglsdec.c:370:    zero = av_mallocz(s->picture_ptr->linesize[0]);
+jpeglsdec.c:446:            cur += s->picture_ptr->linesize[0];
+jpeglsdec.c:458:        memset(cur, 0, s->picture_ptr->linesize[0]);
+jpeglsdec.c:477:            cur += s->picture_ptr->linesize[0];
+jpeglsdec.c:531:                src += s->picture_ptr->linesize[0];
+jpeglsdec.c:548:                src += s->picture_ptr->linesize[0];
+jpeglsdec.c:556:                src += s->picture_ptr->linesize[0] / 2;
+jvdec.c:68:static inline void decode2x2(GetBitContext *gb, uint8_t *dst, int linesize)
+jvdec.c:76:            memset(dst + j * linesize, v[0], 2);
+jvdec.c:83:                dst[j * linesize + i] = v[get_bits1(gb)];
+jvdec.c:88:                dst[j * linesize + i] = get_bits(gb, 8);
+jvdec.c:95:static inline void decode4x4(GetBitContext *gb, uint8_t *dst, int linesize)
+jvdec.c:103:            memset(dst + j * linesize, v[0], 4);
+jvdec.c:110:                dst[j * linesize + i] = v[get_bits1(gb)];
+jvdec.c:112:                dst[(j + 1) * linesize + i] = v[get_bits1(gb)];
+jvdec.c:118:                decode2x2(gb, dst + j * linesize + i, linesize);
+jvdec.c:125:static inline void decode8x8(GetBitContext *gb, uint8_t *dst, int linesize,
+jvdec.c:133:        bdsp->fill_block_tab[1](dst, v[0], linesize, 8);
+jvdec.c:140:                dst[j * linesize + i] = v[get_bits1(gb)];
+jvdec.c:145:                decode4x4(gb, dst + j * linesize + i, linesize);
+jvdec.c:185:                              s->frame->data[0] + j * s->frame->linesize[0] + i,
+jvdec.c:186:                              s->frame->linesize[0], &s->bdsp);
+jvdec.c:197:                memset(s->frame->data[0] + j * s->frame->linesize[0],
+kgv1dec.c:157:    av_image_copy_plane(frame->data[0], frame->linesize[0],
+lcldec.c:181:    int linesize, offset;
+lcldec.c:386:    y_out = frame->data[0] + (height - 1) * frame->linesize[0];
+lcldec.c:387:    offset = (height - 1) * frame->linesize[1];
+lcldec.c:389:    offset = (height - 1) * frame->linesize[2];
+lcldec.c:399:            y_out -= frame->linesize[0];
+lcldec.c:400:            u_out -= frame->linesize[1];
+lcldec.c:401:            v_out -= frame->linesize[2];
+lcldec.c:419:            y_out -= frame->linesize[0];
+lcldec.c:420:            u_out -= frame->linesize[1];
+lcldec.c:421:            v_out -= frame->linesize[2];
+lcldec.c:425:        linesize = len < FFALIGN(3 * width, 4) * height ? 3 * width : FFALIGN(3 * width, 4);
+lcldec.c:427:            pixel_ptr = row * frame->linesize[0];
+lcldec.c:429:            encoded += linesize;
+lcldec.c:444:            y_out -= frame->linesize[0];
+lcldec.c:445:            u_out -= frame->linesize[1];
+lcldec.c:446:            v_out -= frame->linesize[2];
+lcldec.c:457:            y_out -= frame->linesize[0];
+lcldec.c:458:            u_out -= frame->linesize[1];
+lcldec.c:459:            v_out -= frame->linesize[2];
+lcldec.c:463:        u_out = frame->data[1] + ((height >> 1) - 1) * frame->linesize[1];
+lcldec.c:464:        v_out = frame->data[2] + ((height >> 1) - 1) * frame->linesize[2];
+lcldec.c:469:                memcpy(y_out + col - frame->linesize[0], encoded, 2);
+lcldec.c:474:            y_out -= frame->linesize[0] << 1;
+lcldec.c:475:            u_out -= frame->linesize[1];
+lcldec.c:476:            v_out -= frame->linesize[2];
+leaddec.c:229:                            memcpy(frame->data[plane] + (y+yy)*frame->linesize[plane] + x, tmp + yy, 8);
+leaddec.c:233:                            frame->data[plane] + y*frame->linesize[plane] + x,
+leaddec.c:234:                            frame->linesize[plane]);
+leaddec.c:261:                        frame->data[plane] + y*frame->linesize[plane] + x,
+leaddec.c:262:                        (yuv20p_half && b < 2 ? 2 : 1) * frame->linesize[plane]);
+leaddec.c:267:                        copy_block8(frame->data[plane] + (y + 1)*frame->linesize[plane] + x,
+leaddec.c:268:                                    frame->data[plane] + y*frame->linesize[plane] + x,
+leaddec.c:269:                                    2*frame->linesize[plane], 2*frame->linesize[plane], 8);
+leaddec.c:283:                            frame->data[plane] + (f + 8*j*fields)*frame->linesize[plane] + 8*i,
+leaddec.c:284:                            fields * frame->linesize[plane]);
+libaomdec.c:215:            av_image_copy(picture->data, picture->linesize, planes,
+libjxldec.c:448:            ctx->jxl_pixfmt.align = ctx->frame->linesize[0];
+libopenh264dec.c:92:    int ret, linesize[4];
+libopenh264dec.c:137:    linesize[0] = info.UsrData.sSystemBuffer.iStride[0];
+libopenh264dec.c:138:    linesize[1] = linesize[2] = info.UsrData.sSystemBuffer.iStride[1];
+libopenh264dec.c:139:    linesize[3] = 0;
+libopenh264dec.c:140:    av_image_copy2(avframe->data, avframe->linesize, ptrs, linesize,
+librsvgdec.c:105:                                                frame->linesize[0]);
+libvpxdec.c:267:        int linesizes[4];
+libvpxdec.c:305:        linesizes[0] = img->stride[VPX_PLANE_Y];
+libvpxdec.c:306:        linesizes[1] = img->stride[VPX_PLANE_U];
+libvpxdec.c:307:        linesizes[2] = img->stride[VPX_PLANE_V];
+libvpxdec.c:308:        linesizes[3] =
+libvpxdec.c:325:                picture->linesize[i] = linesizes[i];
+libvpxdec.c:330:            av_image_copy2(picture->data, picture->linesize, planes,
+libvpxdec.c:331:                           linesizes, avctx->pix_fmt, img->d_w, img->d_h);
+libzvbi-teletextdec.c:419:        uint8_t *pixel = sub_rect->data[0] + iy * sub_rect->linesize[0];
+libzvbi-teletextdec.c:471:    sub_rect->linesize[0] = resx;
+libzvbi-teletextdec.c:476:                            sub_rect->data[0], sub_rect->linesize[0],
+loco.c:237:        decoded = loco_decode_plane(l, p->data[1] + p->linesize[1]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:240:        decoded = loco_decode_plane(l, p->data[0] + p->linesize[0]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:243:        decoded = loco_decode_plane(l, p->data[2] + p->linesize[2]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:253:        decoded = loco_decode_plane(l, p->data[1] + p->linesize[1]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:256:        decoded = loco_decode_plane(l, p->data[0] + p->linesize[0]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:259:        decoded = loco_decode_plane(l, p->data[2] + p->linesize[2]*(avctx->height-1), avctx->width, avctx->height,
+loco.c:262:        decoded = loco_decode_plane(l, p->data[3] + p->linesize[3]*(avctx->height-1), avctx->width, avctx->height,
+lscrdec.c:53:    int             image_linesize;
+lscrdec.c:65:    ptr = s->image_buf + s->image_linesize * s->y;
+lscrdec.c:69:        last_row = ptr - s->image_linesize;
+lscrdec.c:189:        s->image_buf         = frame->data[0] + (avctx->height - y - 1) * frame->linesize[0] + x * 3;
+lscrdec.c:190:        s->image_linesize    =-frame->linesize[0];
+magicyuvenc.c:511:        const int decorrelate_linesize = aligned_width;
+magicyuvenc.c:512:        const uint8_t *const data[4] = { decorrelated[0], frame->data[0] + n * slice_height * frame->linesize[0],
+magicyuvenc.c:513:                                         decorrelated[1], s->planes == 4 ? frame->data[3] + n * slice_height * frame->linesize[3] : NULL };
+magicyuvenc.c:515:        const int linesize[4]  = { decorrelate_linesize, frame->linesize[0],
+magicyuvenc.c:516:                                   decorrelate_linesize, frame->linesize[3] };
+magicyuvenc.c:528:            decorrelated[0] += decorrelate_linesize;
+magicyuvenc.c:529:            decorrelated[1] += decorrelate_linesize;
+mdec.c:153:    int linesize = frame->linesize[0];
+mdec.c:155:    uint8_t *dest_y  = frame->data[0] + (mb_y * 16* linesize              ) + mb_x * 16;
+mdec.c:156:    uint8_t *dest_cb = frame->data[1] + (mb_y * 8 * frame->linesize[1]) + mb_x * 8;
+mdec.c:157:    uint8_t *dest_cr = frame->data[2] + (mb_y * 8 * frame->linesize[2]) + mb_x * 8;
+mdec.c:159:    a->idsp.idct_put(dest_y,                    linesize, block[0]);
+mdec.c:160:    a->idsp.idct_put(dest_y + 8,                linesize, block[1]);
+mdec.c:161:    a->idsp.idct_put(dest_y + 8 * linesize,     linesize, block[2]);
+mdec.c:162:    a->idsp.idct_put(dest_y + 8 * linesize + 8, linesize, block[3]);
+mdec.c:165:        a->idsp.idct_put(dest_cb, frame->linesize[1], block[4]);
+mdec.c:166:        a->idsp.idct_put(dest_cr, frame->linesize[2], block[5]);
+mediacodec_sw_buffer.c:110:        if (frame->linesize[i] == stride) {
+mediacodec_sw_buffer.c:119:                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2) / 2);
+mediacodec_sw_buffer.c:125:                dst += frame->linesize[i];
+mediacodec_sw_buffer.c:158:        if (frame->linesize[i] == s->stride) {
+mediacodec_sw_buffer.c:167:                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2));
+mediacodec_sw_buffer.c:173:                dst += frame->linesize[i];
+mediacodec_sw_buffer.c:206:        if (frame->linesize[i] == s->stride) {
+mediacodec_sw_buffer.c:215:                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2));
+mediacodec_sw_buffer.c:221:                dst += frame->linesize[i];
+mediacodec_sw_buffer.c:280:    size_t linesize = frame->linesize[0];
+mediacodec_sw_buffer.c:298:            size_t luma_idx = y * QCOM_TILE_HEIGHT * linesize + x * QCOM_TILE_WIDTH;
+mediacodec_sw_buffer.c:301:            size_t chroma_idx = (luma_idx / linesize) * linesize / 2 + (luma_idx % linesize);
+mediacodec_sw_buffer.c:325:                luma_idx += linesize;
+mediacodec_sw_buffer.c:329:                luma_idx += linesize;
+mediacodec_sw_buffer.c:333:                chroma_idx += linesize;
+mediacodecdec_common.c:307:            "destination linesizes=%d,%d,%d\n" ,
+mediacodecdec_common.c:310:            frame->linesize[0], frame->linesize[1], frame->linesize[2]);
+mediacodecenc.c:467:    int dst_linesize[4] = {};
+mediacodecenc.c:474:        dst_linesize[0] = s->width;
+mediacodecenc.c:475:        dst_linesize[1] = dst_linesize[2] = s->width / 2;
+mediacodecenc.c:480:        dst_linesize[0] = s->width;
+mediacodecenc.c:481:        dst_linesize[1] = s->width;
+mediacodecenc.c:486:    av_image_copy2(dst_data, dst_linesize, frame->data, frame->linesize,
+mjpegdec.c:767:            s->linesize[i] = s->picture_ptr->linesize[i] << s->interlaced;
+mjpegdec.c:770:                s->width, s->height, s->linesize[0], s->linesize[1],
+mjpegdec.c:1106:    const int linesize = s->linesize[0];
+mjpegdec.c:1146:        uint8_t *ptr = s->picture_ptr->data[0] + (linesize * mb_y);
+mjpegdec.c:1149:            ptr += linesize >> 1;
+mjpegdec.c:1303:                    int n, h, v, x, y, c, j, linesize;
+mjpegdec.c:1310:                    linesize= s->linesize[c];
+mjpegdec.c:1312:                    if(bits>8) linesize /= 2;
+mjpegdec.c:1324:                            ptr = s->picture_ptr->data[c] + (linesize * (v * mb_y + y)) + (h * mb_x + x); //FIXME optimize this crap
+mjpegdec.c:1333:                                    pred= ptr[-linesize];
+mjpegdec.c:1335:                                    PREDICT(pred, ptr[-linesize-1], ptr[-linesize], ptr[-1], predictor);
+mjpegdec.c:1340:                                ptr += linesize >> 1;
+mjpegdec.c:1344:                            ptr16 = (uint16_t*)(s->picture_ptr->data[c] + 2*(linesize * (v * mb_y + y)) + 2*(h * mb_x + x)); //FIXME optimize this crap
+mjpegdec.c:1353:                                    pred= ptr16[-linesize];
+mjpegdec.c:1355:                                    PREDICT(pred, ptr16[-linesize-1], ptr16[-linesize], ptr16[-1], predictor);
+mjpegdec.c:1360:                                ptr16 += linesize >> 1;
+mjpegdec.c:1374:                    int n, h, v, x, y, c, j, linesize, dc;
+mjpegdec.c:1381:                    linesize = s->linesize[c];
+mjpegdec.c:1383:                    if(bits>8) linesize /= 2;
+mjpegdec.c:1396:                              (linesize * (v * mb_y + y)) +
+mjpegdec.c:1398:                            PREDICT(pred, ptr[-linesize-1], ptr[-linesize], ptr[-1], predictor);
+mjpegdec.c:1403:                            ptr16 = (uint16_t*)(s->picture_ptr->data[c] + 2*(linesize * (v * mb_y + y)) + 2*(h * mb_x + x)); //FIXME optimize this crap
+mjpegdec.c:1404:                            PREDICT(pred, ptr16[-linesize-1], ptr16[-linesize], ptr16[-1], predictor);
+mjpegdec.c:1428:                                              int linesize, int lowres)
+mjpegdec.c:1431:    case 0: s->hdsp.put_pixels_tab[1][0](dst, src, linesize, 8);
+mjpegdec.c:1433:    case 1: copy_block4(dst, src, linesize, linesize, 4);
+mjpegdec.c:1435:    case 2: copy_block2(dst, src, linesize, linesize, 2);
+mjpegdec.c:1442:static void shift_output(MJpegDecodeContext *s, uint8_t *ptr, int linesize)
+mjpegdec.c:1449:                *(uint16_t*)(ptr + 2*block_x + block_y*linesize) <<= 16 - s->bits;
+mjpegdec.c:1453:                *(ptr + block_x + block_y*linesize) <<= 8 - s->bits;
+mjpegdec.c:1465:    int linesize[MAX_COMPONENTS];
+mjpegdec.c:1488:        linesize[c] = s->linesize[c];
+mjpegdec.c:1515:                    block_offset = (((linesize[c] * (v * mb_y + y) * 8) +
+mjpegdec.c:1519:                        block_offset += linesize[c] >> 1;
+mjpegdec.c:1529:                                                linesize[c], s->avctx->lowres);
+mjpegdec.c:1540:                            if (ptr && linesize[c]) {
+mjpegdec.c:1541:                                s->idsp.idct_put(ptr, linesize[c], s->block);
+mjpegdec.c:1543:                                    shift_output(s, ptr, linesize[c]);
+mjpegdec.c:1642:        int linesize  = s->linesize[c];
+mjpegdec.c:1652:            data += linesize >> 1;
+mjpegdec.c:1655:            uint8_t *ptr     = data + (mb_y * linesize * 8 >> s->avctx->lowres);
+mjpegdec.c:1659:                s->idsp.idct_put(ptr, linesize, *block);
+mjpegdec.c:1661:                    shift_output(s, ptr, linesize);
+mjpegdec.c:2703:                line += s->linesize[p];
+mjpegdec.c:2738:            dst = &((uint8_t *)s->picture_ptr->data[p])[(h - 1) * s->linesize[p]];
+mjpegdec.c:2740:                uint8_t *src1 = &((uint8_t *)s->picture_ptr->data[p])[i * s->upscale_v[p] / (s->upscale_v[p] + 1) * s->linesize[p]];
+mjpegdec.c:2741:                uint8_t *src2 = &((uint8_t *)s->picture_ptr->data[p])[(i + 1) * s->upscale_v[p] / (s->upscale_v[p] + 1) * s->linesize[p]];
+mjpegdec.c:2748:                dst -= s->linesize[p];
+mjpegdec.c:2763:                frame->data[index]     += (h - 1) * frame->linesize[index];
+mjpegdec.c:2764:                frame->linesize[index] *= -1;
+mjpegdec.c:2773:        FFSWAP(int, frame->linesize[0], frame->linesize[2]);
+mjpegdec.c:2774:        FFSWAP(int, frame->linesize[0], frame->linesize[1]);
+mjpegdec.c:2786:                             + s->picture_ptr->linesize[index]*i;
+mjpegdec.c:2809:                             + s->picture_ptr->linesize[index]*i;
+mjpegdec.h:111:    int linesize[MAX_COMPONENTS];                   ///< linesize << interlaced
+mmaldec.c:648:        int linesize[4];
+mmaldec.c:653:        av_image_fill_arrays(src, linesize,
+mmaldec.c:656:        av_image_copy2(frame->data, frame->linesize, src, linesize,
+mpeg12dec.c:1301:                                                               s->current_picture.f->linesize[i]);
+mpeg12dec.c:1303:                s->current_picture.f->linesize[i] *= 2;
+mpeg12dec.c:1304:                s->last_picture.f->linesize[i]    *= 2;
+mpeg12dec.c:1305:                s->next_picture.f->linesize[i]    *= 2;
+mpeg12dec.c:1380:                    s->current_picture_ptr->f->linesize[i];
+mpeg12dec.c:2806:            m->idsp.idct_put(frame->data[0] + y * frame->linesize[0] + x,
+mpeg12dec.c:2807:                             frame->linesize[0], s->block[0]);
+mpeg12dec.c:2808:            m->idsp.idct_put(frame->data[0] + y * frame->linesize[0] + x + 8,
+mpeg12dec.c:2809:                             frame->linesize[0], s->block[1]);
+mpeg12dec.c:2810:            m->idsp.idct_put(frame->data[0] + (y + 8) * frame->linesize[0] + x,
+mpeg12dec.c:2811:                             frame->linesize[0], s->block[2]);
+mpeg12dec.c:2812:            m->idsp.idct_put(frame->data[0] + (y + 8) * frame->linesize[0] + x + 8,
+mpeg12dec.c:2813:                             frame->linesize[0], s->block[3]);
+mpeg12dec.c:2814:            m->idsp.idct_put(frame->data[1] + (y >> 1) * frame->linesize[1] + (x >> 1),
+mpeg12dec.c:2815:                             frame->linesize[1], s->block[4]);
+mpeg12dec.c:2816:            m->idsp.idct_put(frame->data[2] + (y >> 1) * frame->linesize[2] + (x >> 1),
+mpeg12dec.c:2817:                             frame->linesize[2], s->block[5]);
+mpeg4videodec.c:83:    ptrdiff_t offset, linesize, uvlinesize;
+mpeg4videodec.c:99:    linesize   = s->linesize;
+mpeg4videodec.c:100:    uvlinesize = s->uvlinesize;
+mpeg4videodec.c:102:    ptr = ref_picture[0] + src_y * linesize + src_x;
+mpeg4videodec.c:107:                                 linesize, linesize,
+mpeg4videodec.c:115:        ctx->mdsp.gmc1(dest_y, ptr, linesize, 16,
+mpeg4videodec.c:117:        ctx->mdsp.gmc1(dest_y + 8, ptr + 8, linesize, 16,
+mpeg4videodec.c:124:            s->hdsp.put_no_rnd_pixels_tab[0][dxy](dest_y, ptr, linesize, 16);
+mpeg4videodec.c:126:            s->hdsp.put_pixels_tab[0][dxy](dest_y, ptr, linesize, 16);
+mpeg4videodec.c:146:    offset = (src_y * uvlinesize) + src_x;
+mpeg4videodec.c:151:                                 uvlinesize, uvlinesize,
+mpeg4videodec.c:158:    ctx->mdsp.gmc1(dest_cb, ptr, uvlinesize, 8,
+mpeg4videodec.c:164:                                 uvlinesize, uvlinesize,
+mpeg4videodec.c:170:    ctx->mdsp.gmc1(dest_cr, ptr, uvlinesize, 8,
+mpeg4videodec.c:179:    int linesize, uvlinesize;
+mpeg4videodec.c:183:    linesize   = s->linesize;
+mpeg4videodec.c:184:    uvlinesize = s->uvlinesize;
+mpeg4videodec.c:193:    ctx->mdsp.gmc(dest_y, ptr, linesize, 16,
+mpeg4videodec.c:199:    ctx->mdsp.gmc(dest_y + 8, ptr, linesize, 16,
+mpeg4videodec.c:216:    ctx->mdsp.gmc(dest_cb, ptr, uvlinesize, 8,
+mpeg4videodec.c:224:    ctx->mdsp.gmc(dest_cr, ptr, uvlinesize, 8,
+mpeg4videodec.c:248:                            uint8_t *dest_cr, int block_size, int uvlinesize,
+mpeg4videodec.c:249:                            int dct_linesize, int dct_offset)
+mpeg4videodec.c:255:        s->idsp.idct_put(dest_y,                               dct_linesize, (int16_t*)ctx->block32[0]);
+mpeg4videodec.c:256:        s->idsp.idct_put(dest_y              + act_block_size, dct_linesize, (int16_t*)ctx->block32[1]);
+mpeg4videodec.c:257:        s->idsp.idct_put(dest_y + dct_offset,                  dct_linesize, (int16_t*)ctx->block32[2]);
+mpeg4videodec.c:258:        s->idsp.idct_put(dest_y + dct_offset + act_block_size, dct_linesize, (int16_t*)ctx->block32[3]);
+mpeg4videodec.c:260:        dct_linesize = uvlinesize << s->interlaced_dct;
+mpeg4videodec.c:261:        dct_offset   = s->interlaced_dct ? uvlinesize : uvlinesize*block_size;
+mpeg4videodec.c:263:        s->idsp.idct_put(dest_cb,              dct_linesize, (int16_t*)ctx->block32[4]);
+mpeg4videodec.c:264:        s->idsp.idct_put(dest_cr,              dct_linesize, (int16_t*)ctx->block32[5]);
+mpeg4videodec.c:265:        s->idsp.idct_put(dest_cb + dct_offset, dct_linesize, (int16_t*)ctx->block32[6]);
+mpeg4videodec.c:266:        s->idsp.idct_put(dest_cr + dct_offset, dct_linesize, (int16_t*)ctx->block32[7]);
+mpeg4videodec.c:268:            s->idsp.idct_put(dest_cb + act_block_size,              dct_linesize, (int16_t*)ctx->block32[8]);
+mpeg4videodec.c:269:            s->idsp.idct_put(dest_cr + act_block_size,              dct_linesize, (int16_t*)ctx->block32[9]);
+mpeg4videodec.c:270:            s->idsp.idct_put(dest_cb + act_block_size + dct_offset, dct_linesize, (int16_t*)ctx->block32[10]);
+mpeg4videodec.c:271:            s->idsp.idct_put(dest_cr + act_block_size + dct_offset, dct_linesize, (int16_t*)ctx->block32[11]);
+mpeg4videodec.c:275:        int linesize[3] = {dct_linesize, uvlinesize, uvlinesize};
+mpeg4videodec.c:285:                dest_pcm[i] += linesize[i] / 2;
+mpeg4videodec.c:291:        int linesize[3] = {dct_linesize, uvlinesize, uvlinesize};
+mpeg4videodec.c:299:            dest_pcm[i] += (linesize[i] / 2) * ((16 >> vsub + lowres) - 1);
+mpeg4videodec.c:304:                dest_pcm[i] -= linesize[i] / 2;
+mpeg4videodec.h:96:                            uint8_t *dest_cr, int block_size, int uvlinesize,
+mpeg4videodec.h:97:                            int dct_linesize, int dct_offset);
+mpegpicture.c:128:static int handle_pic_linesizes(AVCodecContext *avctx, Picture *pic,
+mpegvideo_dec.c:169:    // linesize-dependent scratch buffer allocation
+mpegvideo_dec.c:171:        if (s1->linesize) {
+mpegvideo_dec.c:173:                                        &s->sc, s1->linesize) < 0) {
+mpegvideo_dec.c:275:                           &s->linesize, &s->uvlinesize);
+mpegvideo_dec.c:306:        memset(frame->data[0] + frame->linesize[0] * i, luma, frame->width);
+mpegvideo_dec.c:312:        memset(frame->data[1] + frame->linesize[1] * i,
+mpegvideo_dec.c:314:        memset(frame->data[2] + frame->linesize[2] * i,
+mpegvideo_dec.c:563:                                 s->linesize, s->linesize,
+mpegvideo_dec.c:574:        src += s->linesize;
+mpegvideo_dec.c:594:    ptrdiff_t uvlinesize, linesize;
+mpegvideo_dec.c:602:    linesize   = s->current_picture.f->linesize[0] << field_based;
+mpegvideo_dec.c:603:    uvlinesize = s->current_picture.f->linesize[1] << field_based;
+mpegvideo_dec.c:659:    ptr_y  = ref_picture[0] + src_y   * linesize   + src_x;
+mpegvideo_dec.c:660:    ptr_cb = ref_picture[1] + uvsrc_y * uvlinesize + uvsrc_x;
+mpegvideo_dec.c:661:    ptr_cr = ref_picture[2] + uvsrc_y * uvlinesize + uvsrc_x;
+mpegvideo_dec.c:666:                                 linesize >> field_based, linesize >> field_based,
+mpegvideo_dec.c:672:            uint8_t *ubuf = s->sc.edge_emu_buffer + 18 * s->linesize;
+mpegvideo_dec.c:673:            uint8_t *vbuf =ubuf + 10 * s->uvlinesize;
+mpegvideo_dec.c:675:                vbuf -= s->uvlinesize;
+mpegvideo_dec.c:677:                                     uvlinesize >> field_based, uvlinesize >> field_based,
+mpegvideo_dec.c:682:                                     uvlinesize >> field_based,uvlinesize >> field_based,
+mpegvideo_dec.c:693:        dest_y  += s->linesize;
+mpegvideo_dec.c:694:        dest_cb += s->uvlinesize;
+mpegvideo_dec.c:695:        dest_cr += s->uvlinesize;
+mpegvideo_dec.c:699:        ptr_y   += s->linesize;
+mpegvideo_dec.c:700:        ptr_cb  += s->uvlinesize;
+mpegvideo_dec.c:701:        ptr_cr  += s->uvlinesize;
+mpegvideo_dec.c:706:    pix_op[lowres - 1](dest_y, ptr_y, linesize, h, sx, sy);
+mpegvideo_dec.c:712:            pix_op[op_index](dest_cb, ptr_cb, uvlinesize, hc, uvsx, uvsy);
+mpegvideo_dec.c:713:            pix_op[op_index](dest_cr, ptr_cr, uvlinesize, hc, uvsx, uvsy);
+mpegvideo_dec.c:750:    offset = src_y * s->uvlinesize + src_x;
+mpegvideo_dec.c:755:                                 s->uvlinesize, s->uvlinesize,
+mpegvideo_dec.c:763:    pix_op[op_index](dest_cb, ptr, s->uvlinesize, block_s, sx, sy);
+mpegvideo_dec.c:768:                                 s->uvlinesize, s->uvlinesize,
+mpegvideo_dec.c:773:    pix_op[op_index](dest_cr, ptr, s->uvlinesize, block_s, sx, sy);
+mpegvideo_dec.c:814:                               s->linesize) * block_s,
+mpegvideo_dec.c:818:                               s->width, s->height, s->linesize,
+mpegvideo_dec.c:875:            dest_y  +=  2 * block_s *  s->linesize;
+mpegvideo_dec.c:876:            dest_cb += (2 * block_s >> s->chroma_y_shift) * s->uvlinesize;
+mpegvideo_dec.c:877:            dest_cr += (2 * block_s >> s->chroma_y_shift) * s->uvlinesize;
+msp2dec.c:59:            memset(p->data[0] + y * p->linesize[0], 0xFF, width);
+msp2dec.c:74:                memcpy(p->data[0] + y * p->linesize[0] + x, gb.buffer, FFMIN(size, width - x));
+msp2dec.c:82:                memset(p->data[0] + y * p->linesize[0] + x, value, FFMIN(size, width - x));
+msrledec.c:83:                    pic->data[0][line * pic->linesize[0] + pixel_ptr] = stream_byte >> 4;
+msrledec.c:89:                    pic->data[0][line * pic->linesize[0] + pixel_ptr] = stream_byte & 0x0F;
+msrledec.c:109:                    pic->data[0][line * pic->linesize[0] + pixel_ptr] = stream_byte >> 4;
+msrledec.c:111:                    pic->data[0][line * pic->linesize[0] + pixel_ptr] = stream_byte & 0x0F;
+msrledec.c:136:    unsigned int width= FFABS(pic->linesize[0]) / (depth >> 3);
+msrledec.c:138:    output     = pic->data[0] + (avctx->height - 1) * pic->linesize[0];
+msrledec.c:139:    output_end = output + FFABS(pic->linesize[0]);
+msrledec.c:156:                output = pic->data[0] + line * pic->linesize[0];
+msrledec.c:157:                output_end = output + FFABS(pic->linesize[0]);
+msrledec.c:171:                output = pic->data[0] + line * pic->linesize[0] + pos * (depth >> 3);
+msrledec.c:172:                output_end = pic->data[0] + line * pic->linesize[0] + FFABS(pic->linesize[0]);
+mss3.c:763:    dst[0] = c->pic->data[0] + dec_x     +  dec_y      * c->pic->linesize[0];
+mss3.c:764:    dst[1] = c->pic->data[1] + dec_x / 2 + (dec_y / 2) * c->pic->linesize[1];
+mss3.c:765:    dst[2] = c->pic->data[2] + dec_x / 2 + (dec_y / 2) * c->pic->linesize[2];
+mvcdec.c:64:                       uint8_t *dst_start, int width, int height, int linesize)
+mvcdec.c:96:    dst = dst_start + (y + row) * linesize + x * 2;                           \
+mvcdec.c:111:static void set_4x4_block(uint8_t *dst, int linesize, uint32_t pixel)
+mvcdec.c:116:            AV_WN32A(dst + j * linesize + i * 4, pixel);
+mvcdec.c:124:    dst = dst_start + (y + row) * linesize + x * 4;                           \
+mvcdec.c:138:                       int linesize, int vflip)
+mvcdec.c:166:        dst_start += (height - 1) * linesize;
+mvcdec.c:167:        linesize   = -linesize;
+mvcdec.c:176:                set_4x4_block(dst_start + y * linesize + x * 4, linesize,
+mvcdec.c:186:                set_4x4_block(dst_start + y * linesize + x * 4, linesize,
+mvcdec.c:195:                    set_4x4_block(dst_start + y * linesize + x * 4, linesize,
+mvcdec.c:241:                          avctx->width, avctx->height, frame->linesize[0]);
+mvcdec.c:244:                          avctx->width, avctx->height, frame->linesize[0],
+mxpegdec.c:173:                 reference_ptr->linesize[i] != jpg->picture_ptr->linesize[i]) {
+nvdec.c:536:    for (i = 0; frame->linesize[i]; i++) {
+nvdec.c:538:        frame->linesize[i] = pitch;
+opusdec.c:559:        s->out_size = frame->linesize[0] - ret * sizeof(float);
+opusdec.c:614:                   frame->linesize[0]);
+opusdec.c:616:            memset(frame->extended_data[i], 0, frame->linesize[0]);
+pdvdec.c:99:            prev += prev_frame->linesize[0];
+pdvdec.c:102:        dst += frame->linesize[0];
+pgssubdec.c:561:            rect->linesize[0] = object->w;
+pgxdec.c:100:            PIXEL *line = (PIXEL*)(frame->data[0] + i * frame->linesize[0]);                \
+pictordec.c:45:        uint8_t *d = frame->data[0] + *y * frame->linesize[0];
+pictordec.c:74:    d = frame->data[0] + yl * frame->linesize[0];
+pictordec.c:91:                d = frame->data[0] + yl * frame->linesize[0];
+pictordec.c:193:    memset(frame->data[0], 0, s->height * frame->linesize[0]);
+pictordec.c:293:            memcpy(frame->data[0] + y * frame->linesize[0], s->g.buffer, FFMIN(avctx->width, bytestream2_get_bytes_left(&s->g)));
+pngdec.c:955:    ret = png_decode_idat(s, gb, p->data[0], p->linesize[0]);
+pngdec.c:1125:            pd += p->linesize[0];
+pngdec.c:1153:            pd += p->linesize[0];
+pngdec.c:1173:            pd += p->linesize[0];
+pngdec.c:1254:    int ls = av_image_get_linesize(p->format, s->width, 0);
+pngdec.c:1262:        pd      += p->linesize[0];
+pngdec.c:1263:        pd_last += s->last_picture.f->linesize[0];
+pngdec.c:1275:    ptrdiff_t      dst_stride = p->linesize[0];
+pngdec.c:1277:    ptrdiff_t      src_stride = s->last_picture.f->linesize[0];
+pngdec.c:1365:    const ptrdiff_t dst_stride = s->picture.f->linesize[0];
+pngdec.c:1619:            uint8_t *row = &p->data[0][p->linesize[0] * y];
+pngdec.c:1641:            uint8_t *row = &p->data[0][p->linesize[0] * y];
+pnmdec.c:50:    int i, j, k, n, linesize, h, upgrade = 0, is_mono = 0;
+pnmdec.c:134:        linesize = p->linesize[0];
+pnmdec.c:140:                init_put_bits(&pb, ptr, FFABS(linesize));
+pnmdec.c:170:                ptr+= linesize;
+pnmdec.c:188:                ptr           += linesize;
+pnmdec.c:200:            linesize = p->linesize[0];
+pnmdec.c:208:                ptr           += linesize;
+pnmdec.c:219:                ptr1 += p->linesize[1];
+pnmdec.c:220:                ptr2 += p->linesize[2];
+pnmdec.c:232:            linesize = p->linesize[0];
+pnmdec.c:241:                ptr           += linesize;
+pnmdec.c:260:                ptr1 += p->linesize[1] / 2;
+pnmdec.c:261:                ptr2 += p->linesize[2] / 2;
+pnmdec.c:284:                    r += p->linesize[2] / 4;
+pnmdec.c:285:                    g += p->linesize[0] / 4;
+pnmdec.c:286:                    b += p->linesize[1] / 4;
+pnmdec.c:302:                    r += p->linesize[2] / 4;
+pnmdec.c:303:                    g += p->linesize[0] / 4;
+pnmdec.c:304:                    b += p->linesize[1] / 4;
+pnmdec.c:325:                    r += p->linesize[2] / 4;
+pnmdec.c:326:                    g += p->linesize[0] / 4;
+pnmdec.c:327:                    b += p->linesize[1] / 4;
+pnmdec.c:343:                    r += p->linesize[2] / 4;
+pnmdec.c:344:                    g += p->linesize[0] / 4;
+pnmdec.c:345:                    b += p->linesize[1] / 4;
+pnmdec.c:350:        p->data[0] += (avctx->height - 1) * p->linesize[0];
+pnmdec.c:351:        p->data[1] += (avctx->height - 1) * p->linesize[1];
+pnmdec.c:352:        p->data[2] += (avctx->height - 1) * p->linesize[2];
+pnmdec.c:353:        p->linesize[0] = -p->linesize[0];
+pnmdec.c:354:        p->linesize[1] = -p->linesize[1];
+pnmdec.c:355:        p->linesize[2] = -p->linesize[2];
+pnmdec.c:369:                    g += p->linesize[0] / 4;
+pnmdec.c:378:                    g += p->linesize[0] / 4;
+pnmdec.c:392:                    g += p->linesize[0] / 4;
+pnmdec.c:401:                    g += p->linesize[0] / 4;
+pnmdec.c:406:        p->data[0] += (avctx->height - 1) * p->linesize[0];
+pnmdec.c:407:        p->linesize[0] = -p->linesize[0];
+proresdec.c:684:        luma_stride   = pic->linesize[0];
+proresdec.c:685:        chroma_stride = pic->linesize[1];
+proresdec.c:687:        luma_stride   = pic->linesize[0] << 1;
+proresdec.c:688:        chroma_stride = pic->linesize[1] << 1;
+proresdec.c:706:        dest_y += pic->linesize[0];
+proresdec.c:707:        dest_u += pic->linesize[1];
+proresdec.c:708:        dest_v += pic->linesize[2];
+proresdec.c:709:        offset += pic->linesize[3];
+qoidec.c:74:            dst += p->linesize[0];
+qpeg.c:294:        qpeg_decode_intra(a, outdata, p->linesize[0], avctx->width, avctx->height);
+qpeg.c:296:        qpeg_decode_inter(a, outdata, p->linesize[0], avctx->width, avctx->height, delta, ctable, ref->data[0]);
+qsvdec.c:141:        frame->linesize[0] = FFALIGN(avctx->width, 128);
+qsvdec.c:146:        frame->linesize[0] = 2 * FFALIGN(avctx->width, 128);
+qsvdec.c:152:        frame->linesize[0] = 4 * FFALIGN(avctx->width, 128);
+qsvdec.c:155:        frame->linesize[0] = 8 * FFALIGN(avctx->width, 128);
+qsvdec.c:170:        frame->linesize[1] = frame->linesize[0];
+qsvdec.c:172:            frame->linesize[0] * FFALIGN(avctx->height, 64);
+r210dec.c:95:        g_line += pic->linesize[0];
+r210dec.c:96:        b_line += pic->linesize[1];
+r210dec.c:97:        r_line += pic->linesize[2];
+rawdec.c:133:    frame->data[0]     += frame->linesize[0] * (avctx->height - 1);
+rawdec.c:134:    frame->linesize[0] *= -1;
+rawdec.c:172:    int linesize_align             = 4;
+rawdec.c:310:        linesize_align = 16;
+rawdec.c:352:    if ((res = av_image_fill_arrays(frame->data, frame->linesize,
+rawdec.c:405:        FFALIGN(frame->linesize[0], linesize_align) * avctx->height <= buf_size)
+rawdec.c:406:        frame->linesize[0] = FFALIGN(frame->linesize[0], linesize_align);
+rawdec.c:409:        FFALIGN(frame->linesize[0], linesize_align) * avctx->height +
+rawdec.c:410:        FFALIGN(frame->linesize[1], linesize_align) * ((avctx->height + 1) / 2) <= buf_size) {
+rawdec.c:411:        int la0 = FFALIGN(frame->linesize[0], linesize_align);
+rawdec.c:412:        frame->data[1] += (la0 - frame->linesize[0]) * avctx->height;
+rawdec.c:413:        frame->linesize[0] = la0;
+rawdec.c:414:        frame->linesize[1] = FFALIGN(frame->linesize[1], linesize_align);
+rawdec.c:427:        ((frame->linesize[0] + 3) & ~3) * avctx->height <= buf_size)
+rawdec.c:428:        frame->linesize[0] = (frame->linesize[0] + 3) & ~3;
+rawdec.c:451:            line += frame->linesize[0];
+rawdec.c:465:            dst += frame->linesize[0];
+rl2.c:209:    rl2_rle_decode(s, buf, buf_size, frame->data[0], frame->linesize[0],
+rtv1.c:40:static int decode_rtv1(GetByteContext *gb, uint8_t *dst, ptrdiff_t linesize,
+rtv1.c:131:    ret = decode_rtv1(&gb, dst, linesize, width, height, flags, dsp->dxt1_block);
+scpr.c:297:static int decompress_i(AVCodecContext *avctx, uint32_t *dst, int linesize)
+scpr3.c:928:static int decompress_i3(AVCodecContext *avctx, uint32_t *dst, int linesize)
+sgidec.c:183:    ptrdiff_t linesize[4];
+sgidec.c:238:    linesize[(in_idx)] = p->linesize[(out_idx)]
+sgidec.c:257:        ret = read_rle_sgi(avctx, out, linesize, &g,
+sgidec.c:260:        ret = read_uncompressed_sgi(out, linesize, &g,
+sgirledec.c:62: * @param linesize Line size of destination buffer (bytes)
+sgirledec.c:68:                          int width, int height, ptrdiff_t linesize)
+sgirledec.c:89:                memset(dst + y * linesize + x, RBG323_TO_BGR8(*src), length);
+sgirledec.c:100:                rbg323_to_bgr8(dst + y * linesize + x, src, length);
+sgirledec.c:122:                         avctx->width, avctx->height, frame->linesize[0]);
+snowdec.c:191:    int ref_stride= s->current_picture->linesize[plane_index];
+snowdec.c:688:                    int v= s->current_picture->data[plane_index][y*s->current_picture->linesize[plane_index] + x];
+snowdec.c:689:                    s->mconly_picture->data[plane_index][y*s->mconly_picture->linesize[plane_index] + x]= v;
+speedhqdec.c:99:static inline int decode_alpha_block(const SHQContext *s, GetBitContext *gb, uint8_t last_alpha[16], uint8_t *dest, int linesize)
+speedhqdec.c:133:        dest += linesize;
+speedhqdec.c:139:static inline int decode_dct_block(const SHQContext *s, GetBitContext *gb, int last_dc[4], int component, uint8_t *dest, int linesize)
+speedhqdec.c:191:    s->idsp.idct_put(dest, linesize, block);
+speedhqdec.c:198:    int linesize_y  = frame->linesize[0] * line_stride;
+speedhqdec.c:199:    int linesize_cb = frame->linesize[1] * line_stride;
+speedhqdec.c:200:    int linesize_cr = frame->linesize[2] * line_stride;
+speedhqdec.c:201:    int linesize_a;
+speedhqdec.c:205:        linesize_a = frame->linesize[3] * line_stride;
+speedhqdec.c:213:        dest_y = frame->data[0] + frame->linesize[0] * (y + field_number) + x;
+speedhqdec.c:215:            dest_cb = frame->data[1] + frame->linesize[1] * (y/2 + field_number) + x / 2;
+speedhqdec.c:216:            dest_cr = frame->data[2] + frame->linesize[2] * (y/2 + field_number) + x / 2;
+speedhqdec.c:219:            dest_cb = frame->data[1] + frame->linesize[1] * (y + field_number) + x / 2;
+speedhqdec.c:220:            dest_cr = frame->data[2] + frame->linesize[2] * (y + field_number) + x / 2;
+speedhqdec.c:224:            dest_a = frame->data[3] + frame->linesize[3] * (y + field_number) + x;
+speedhqdec.c:227:        if ((ret = decode_dct_block(s, gb, last_dc, 0, dest_y, linesize_y)) < 0)
+speedhqdec.c:229:        if ((ret = decode_dct_block(s, gb, last_dc, 0, dest_y + 8, linesize_y)) < 0)
+speedhqdec.c:231:        if ((ret = decode_dct_block(s, gb, last_dc, 0, dest_y + 8 * linesize_y, linesize_y)) < 0)
+speedhqdec.c:233:        if ((ret = decode_dct_block(s, gb, last_dc, 0, dest_y + 8 * linesize_y + 8, linesize_y)) < 0)
+speedhqdec.c:235:        if ((ret = decode_dct_block(s, gb, last_dc, 1, dest_cb, linesize_cb)) < 0)
+speedhqdec.c:237:        if ((ret = decode_dct_block(s, gb, last_dc, 2, dest_cr, linesize_cr)) < 0)
+speedhqdec.c:241:            if ((ret = decode_dct_block(s, gb, last_dc, 1, dest_cb + 8 * linesize_cb, linesize_cb)) < 0)
+speedhqdec.c:243:            if ((ret = decode_dct_block(s, gb, last_dc, 2, dest_cr + 8 * linesize_cr, linesize_cr)) < 0)
+speedhqdec.c:249:            if ((ret = decode_alpha_block(s, gb, last_alpha, dest_a, linesize_a)) < 0)
+speedhqdec.c:251:            if ((ret = decode_alpha_block(s, gb, last_alpha, dest_a + 8 * linesize_a, linesize_a)) < 0)
+speedhqdec.c:255:            if ((ret = decode_dct_block(s, gb, last_dc, 3, dest_a, linesize_a)) < 0)
+speedhqdec.c:257:            if ((ret = decode_dct_block(s, gb, last_dc, 3, dest_a + 8, linesize_a)) < 0)
+speedhqdec.c:259:            if ((ret = decode_dct_block(s, gb, last_dc, 3, dest_a + 8 * linesize_a, linesize_a)) < 0)
+speedhqdec.c:261:            if ((ret = decode_dct_block(s, gb, last_dc, 3, dest_a + 8 * linesize_a + 8, linesize_a)) < 0)
+speedhqdec.c:272:    int linesize_y  = frame->linesize[0] * line_stride;
+speedhqdec.c:273:    int linesize_cb = frame->linesize[1] * line_stride;
+speedhqdec.c:274:    int linesize_cr = frame->linesize[2] * line_stride;
+speedhqdec.c:275:    int linesize_a;
+speedhqdec.c:279:        linesize_a = frame->linesize[3] * line_stride;
+speedhqdec.c:314:            dest_y = frame->data[0] + frame->linesize[0] * (y + field_number);
+speedhqdec.c:316:                dest_cb = frame->data[1] + frame->linesize[1] * (y/2 + field_number);
+speedhqdec.c:317:                dest_cr = frame->data[2] + frame->linesize[2] * (y/2 + field_number);
+speedhqdec.c:319:                dest_cb = frame->data[1] + frame->linesize[1] * (y + field_number);
+speedhqdec.c:320:                dest_cr = frame->data[2] + frame->linesize[2] * (y + field_number);
+speedhqdec.c:323:                dest_a = frame->data[3] + frame->linesize[3] * (y + field_number);
+speedhqdec.c:328:                if ((ret = decode_dct_block(s, &gb, last_dc, 0, dest_y, linesize_y)) < 0)
+speedhqdec.c:330:                if ((ret = decode_dct_block(s, &gb, last_dc, 0, dest_y + 8, linesize_y)) < 0)
+speedhqdec.c:332:                if ((ret = decode_dct_block(s, &gb, last_dc, 0, dest_y + 8 * linesize_y, linesize_y)) < 0)
+speedhqdec.c:334:                if ((ret = decode_dct_block(s, &gb, last_dc, 0, dest_y + 8 * linesize_y + 8, linesize_y)) < 0)
+speedhqdec.c:341:                if ((ret = decode_dct_block(s, &gb, last_dc, 1, dest_cb, linesize_cb)) < 0)
+speedhqdec.c:343:                if ((ret = decode_dct_block(s, &gb, last_dc, 2, dest_cr, linesize_cr)) < 0)
+speedhqdec.c:348:                    if ((ret = decode_dct_block(s, &gb, last_dc, 1, dest_cb + 8 * linesize_cb, linesize_cb)) < 0)
+speedhqdec.c:350:                    if ((ret = decode_dct_block(s, &gb, last_dc, 2, dest_cr + 8 * linesize_cr, linesize_cr)) < 0)
+speedhqdec.c:355:                        if ((ret = decode_dct_block(s, &gb, last_dc, 1, dest_cb + 8, linesize_cb)) < 0)
+speedhqdec.c:357:                        if ((ret = decode_dct_block(s, &gb, last_dc, 2, dest_cr + 8, linesize_cr)) < 0)
+speedhqdec.c:359:                        if ((ret = decode_dct_block(s, &gb, last_dc, 1, dest_cb + 8 * linesize_cb + 8, linesize_cb)) < 0)
+speedhqdec.c:361:                        if ((ret = decode_dct_block(s, &gb, last_dc, 2, dest_cr + 8 * linesize_cr + 8, linesize_cr)) < 0)
+speedhqdec.c:374:                    if ((ret = decode_alpha_block(s, &gb, last_alpha, dest_a, linesize_a)) < 0)
+speedhqdec.c:376:                    if ((ret = decode_alpha_block(s, &gb, last_alpha, dest_a + 8 * linesize_a, linesize_a)) < 0)
+speedhqdec.c:381:                    if ((ret = decode_dct_block(s, &gb, last_dc, 3, dest_a, linesize_a)) < 0)
+speedhqdec.c:383:                    if ((ret = decode_dct_block(s, &gb, last_dc, 3, dest_a + 8, linesize_a)) < 0)
+speedhqdec.c:385:                    if ((ret = decode_dct_block(s, &gb, last_dc, 3, dest_a + 8 * linesize_a, linesize_a)) < 0)
+speedhqdec.c:387:                    if ((ret = decode_dct_block(s, &gb, last_dc, 3, dest_a + 8 * linesize_a + 8, linesize_a)) < 0)
+svq1dec.c:708:        int linesize = cur->linesize[i];
+svq1dec.c:726:                                                     linesize);
+svq1dec.c:734:                current += 16 * linesize;
+svq1dec.c:751:                                                     previous, linesize,
+svq1dec.c:764:                current += 16 * linesize;
+svq3.c:688:        hl_decode_mb_predict_luma(s, mb_type, block_offset, linesize, dest_y);
+svq3.c:691:    hl_decode_mb_idct_luma(s, mb_type, block_offset, linesize, dest_y);
+targa_y216dec.c:65:        y += pic->linesize[0] >> 1;
+targa_y216dec.c:66:        u += pic->linesize[1] >> 1;
+targa_y216dec.c:67:        v += pic->linesize[2] >> 1;
+utils.c:358:    avcodec_align_dimensions2(s, width, height, linesize_align);
+utvideodec.c:733:                               frame->linesize[i], avctx->width,
+utvideodec.c:741:                                          frame->linesize[i], avctx->width,
+utvideodec.c:745:                                             frame->linesize[i],
+utvideodec.c:752:                                            frame->linesize[i], avctx->width,
+utvideodec.c:756:                                               frame->linesize[i],
+utvideodec.c:763:                                    frame->linesize[2], frame->linesize[0], frame->linesize[1],
+utvideodec.c:770:                                 frame->linesize[i] / 2, avctx->width,
+utvideodec.c:778:                                      frame->linesize[2] / 2, frame->linesize[0] / 2, frame->linesize[1] / 2,
+utvideodec.c:783:            ret = decode_plane(c, i, frame->data[i], frame->linesize[i],
+utvideodec.c:790:                    restore_median_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:794:                    restore_median_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:801:                    restore_gradient_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:805:                    restore_gradient_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:815:            ret = decode_plane(c, i, frame->data[i], frame->linesize[i],
+utvideodec.c:822:                    restore_median_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:826:                    restore_median_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:832:                    restore_gradient_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:836:                    restore_gradient_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:845:            ret = decode_plane(c, i, frame->data[i], frame->linesize[i],
+utvideodec.c:852:                    restore_median_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:856:                    restore_median_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:862:                    restore_gradient_planar(c, frame->data[i], frame->linesize[i],
+utvideodec.c:866:                    restore_gradient_planar_il(c, frame->data[i], frame->linesize[i],
+utvideodec.c:875:            ret = decode_plane10(c, i, (uint16_t *)frame->data[i], frame->linesize[i] / 2,
+utvideodec.c:884:            ret = decode_plane10(c, i, (uint16_t *)frame->data[i], frame->linesize[i] / 2,
+v210dec.c:116:    int16_t *py = (uint16_t*)frame->data[0] + slice_start * frame->linesize[0] / 2;
+v210dec.c:117:    int16_t *pu = (uint16_t*)frame->data[1] + slice_start * frame->linesize[1] / 2;
+v210dec.c:118:    int16_t *pv = (uint16_t*)frame->data[2] + slice_start * frame->linesize[2] / 2;
+v210dec.c:123:        py += frame->linesize[0] / 2;
+v210dec.c:124:        pu += frame->linesize[1] / 2;
+v210dec.c:125:        pv += frame->linesize[2] / 2;
+v210dec.c:200:        int linesizes[4];
+v210dec.c:201:        int ret = av_image_alloc(pointers, linesizes, avctx->width, avctx->height, avctx->pix_fmt, 1);
+v210dec.c:205:        av_image_copy2(pic->data, pic->linesize, pointers, linesizes,
+v308dec.c:65:        y += pic->linesize[0];
+v308dec.c:66:        u += pic->linesize[1];
+v308dec.c:67:        v += pic->linesize[2];
+v408dec.c:64:        y += pic->linesize[0];
+v408dec.c:65:        u += pic->linesize[1];
+v408dec.c:66:        v += pic->linesize[2];
+v408dec.c:67:        a += pic->linesize[3];
+v410dec.c:65:    y = (uint16_t*)pic->data[0] + slice_start * (pic->linesize[0] >> 1);
+v410dec.c:66:    u = (uint16_t*)pic->data[1] + slice_start * (pic->linesize[1] >> 1);
+v410dec.c:67:    v = (uint16_t*)pic->data[2] + slice_start * (pic->linesize[2] >> 1);
+v410dec.c:80:        y += pic->linesize[0] >> 1;
+v410dec.c:81:        u += pic->linesize[1] >> 1;
+v410dec.c:82:        v += pic->linesize[2] >> 1;
+vbndec.c:65:    int width, height, components, format, compression, pix_fmt, linesize, data_size;
+vbndec.c:111:             linesize = avctx->width * 3;
+vbndec.c:114:             linesize = avctx->width * 4;
+vbndec.c:129:            linesize = avctx->coded_width / 2;
+vbndec.c:133:            linesize = avctx->coded_width;
+vbndec.c:144:    if (image_len < linesize * avctx->coded_height) {
+vbndec.c:158:        uint8_t *flipped = frame->data[0] + frame->linesize[0] * (frame->height - 1);
+vbndec.c:159:        av_image_copy_plane(flipped, -frame->linesize[0], image_buf ? image_buf : gb->buffer, linesize, linesize, frame->height);
+vbndec.c:164:        ctx->dec.frame_data.out = frame->data[0] + frame->linesize[0] * (frame->height - 1);
+vbndec.c:165:        ctx->dec.stride = -frame->linesize[0];
+vc1dec.c:235:                           v->sprite_output_frame->linesize[plane] * row;
+vc1dec.c:239:                int      iline  = s->current_picture.f->linesize[plane];
+vc1dec.c:246:                    iline  = s->last_picture.f->linesize[plane];
+vc1dec.c:353:                memset(f->data[plane] + i * f->linesize[plane],
+vc1dec.c:354:                       plane ? 128 : 0, f->linesize[plane]);
+vc1dec.c:1233:            s->current_picture.f->linesize[0] <<= 1;
+vc1dec.c:1234:            s->current_picture.f->linesize[1] <<= 1;
+vc1dec.c:1235:            s->current_picture.f->linesize[2] <<= 1;
+vc1dec.c:1236:            s->linesize                      <<= 1;
+vc1dec.c:1237:            s->uvlinesize                    <<= 1;
+vc1dec.c:1310:            s->current_picture.f->linesize[0] >>= 1;
+vc1dec.c:1311:            s->current_picture.f->linesize[1] >>= 1;
+vc1dec.c:1312:            s->current_picture.f->linesize[2] >>= 1;
+vc1dec.c:1313:            s->linesize                      >>= 1;
+vc1dec.c:1314:            s->uvlinesize                    >>= 1;
+vmixdec.c:110:    const ptrdiff_t linesize = frame->linesize[plane];
+vmixdec.c:111:    uint8_t *dst = frame->data[plane] + by * linesize;
+vmixdec.c:152:            s->idsp.idct_put(dst + x, linesize, block);
+vmixdec.c:155:        dst += 8 * linesize;
+vmnc.c:478:            res = decode_hextile(c, outptr, gb, w, h, c->pic->linesize[0]);
+vqcdec.c:347:        decode_strip(s, y, s->frame->linesize[0], width);
+vqcdec.c:349:        y += 2 * s->frame->linesize[0];
+vqcdec.c:352:        decode_strip(s, u, s->frame->linesize[1], width / 2);
+vqcdec.c:354:        u += 2 * s->frame->linesize[1];
+vqcdec.c:357:        decode_strip(s, y, s->frame->linesize[0], width);
+vqcdec.c:359:        y += 2 * s->frame->linesize[0];
+vqcdec.c:362:        decode_strip(s, v, s->frame->linesize[2], width / 2);
+vqcdec.c:364:        v += 2 * s->frame->linesize[2];
+wbmpdec.c:39:static void readbits(uint8_t * dst, int width, int height, int linesize, const uint8_t * src, int size)
+wbmpdec.c:46:        dst += linesize;
+wbmpdec.c:72:    if (p->linesize[0] == (width + 7) / 8)
+wbmpdec.c:75:        readbits(p->data[0], width, height, p->linesize[0], gb.buffer, gb.buffer_end - gb.buffer);
+wmv2dec.c:89:    wmv2_add_block(w, block1[0], dest_y,                       s->linesize, 0);
+wmv2dec.c:90:    wmv2_add_block(w, block1[1], dest_y + 8,                   s->linesize, 1);
+wmv2dec.c:91:    wmv2_add_block(w, block1[2], dest_y + 8 * s->linesize,     s->linesize, 2);
+wmv2dec.c:92:    wmv2_add_block(w, block1[3], dest_y + 8 + 8 * s->linesize, s->linesize, 3);
+wmv2dec.c:97:    wmv2_add_block(w, block1[4], dest_cb, s->uvlinesize, 4);
+wmv2dec.c:98:    wmv2_add_block(w, block1[5], dest_cr, s->uvlinesize, 5);
+xbmdec.c:74:    int ret, linesize, i, j;
+xbmdec.c:104:    linesize = (avctx->width + 7) / 8;
+xbmdec.c:106:        dst = p->data[0] + i * p->linesize[0];
+xbmdec.c:107:        for (j = 0; j < linesize; j++) {
+xbmdec.c:121:                if ((val = get_nibble(*ptr)) <= 15 && j+1 < linesize) {
+xfacedec.c:167:            buf += frame->linesize[0];
+xpmdec.c:412:        dst = (uint32_t *)(p->data[0] + i * p->linesize[0]);
+xsubdec.c:112:    rect->linesize[0] = w;
+xwddec.c:243:        ptr += p->linesize[0];
+y41pdec.c:58:        y = &pic->data[0][i * pic->linesize[0]];
+y41pdec.c:59:        u = &pic->data[1][i * pic->linesize[1]];
+y41pdec.c:60:        v = &pic->data[2][i * pic->linesize[2]];
+yuv4dec.c:62:            y[pic->linesize[0] + 2 * j    ] = *src++;
+yuv4dec.c:63:            y[pic->linesize[0] + 2 * j + 1] = *src++;
+yuv4dec.c:66:        y += 2 * pic->linesize[0];
+yuv4dec.c:67:        u +=     pic->linesize[1];
+yuv4dec.c:68:        v +=     pic->linesize[2];
+zerocodec.c:51:        prev += (avctx->height - 1) * prev_pic->linesize[0];
+zerocodec.c:69:    dst = pic->data[0] + (avctx->height - 1) * pic->linesize[0];
+zerocodec.c:90:            prev -= prev_pic->linesize[0];
+zerocodec.c:93:        dst  -= pic->linesize[0];
+diracdec.c:1614:    s->mpvencdsp.draw_edges(ref->hpel[plane][0], ref->avframe->linesize[plane], width, height, edge, edge, EDGE_TOP | EDGE_BOTTOM); /* EDGE_TOP | EDGE_BOTTOM values just copied to make it build, this needs to be ensured */
+diracdec.c:1622:            ref->hpel_base[plane][i] = av_malloc((height+2*edge) * ref->avframe->linesize[plane] + 32);
+diracdec.c:1627:        ref->hpel[plane][i] = ref->hpel_base[plane][i] + edge*ref->avframe->linesize[plane] + 16;
+diracdec.c:1633:                                      ref->avframe->linesize[plane], width, height);
+diracdec.c:1634:        s->mpvencdsp.draw_edges(ref->hpel[plane][1], ref->avframe->linesize[plane], width, height, edge, edge, EDGE_TOP | EDGE_BOTTOM);
+diracdec.c:1635:        s->mpvencdsp.draw_edges(ref->hpel[plane][2], ref->avframe->linesize[plane], width, height, edge, edge, EDGE_TOP | EDGE_BOTTOM);
+diracdec.c:1636:        s->mpvencdsp.draw_edges(ref->hpel[plane][3], ref->avframe->linesize[plane], width, height, edge, edge, EDGE_TOP | EDGE_BOTTOM);
+diracdec.c:1762:                     f->linesize[i] + 32;
+diracdec.c:2043:        s->plane[0].stride = pic->avframe->linesize[0];
+diracdec.c:2044:        s->plane[1].stride = pic->avframe->linesize[1];
+diracdec.c:2045:        s->plane[2].stride = pic->avframe->linesize[2];

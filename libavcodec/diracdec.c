@@ -29,6 +29,7 @@
 #include "diracdec.h"
 #include "hwaccels.h"
 #include "hwconfig.h"
+#include "libavutil/imgutils.c"
 #include "config_components.h"
 
 /* magic number division by 3 from schroedinger */
@@ -2001,12 +2002,22 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         for (i = 0; i < MAX_FRAMES; i++)
             if (s->all_frames[i].avframe->data[0] == NULL)
                 pic = &s->all_frames[i];
+
         if (!pic) {
             av_log(avctx, AV_LOG_ERROR, "framelist full\n");
             return AVERROR_INVALIDDATA;
         }
 
         av_frame_unref(pic->avframe);
+        //
+        // if (s->avctx->hwaccel) {
+        //     const FFHWAccel *hwaccel = ffhwaccel(s->avctx->hwaccel);
+        //     s->hwaccel_picture_private =
+        //         av_mallocz(hwaccel->frame_priv_data_size);
+        //     if (!s->hwaccel_picture_private)
+        //         return AVERROR(ENOMEM);
+        // }
+
 
         /* [DIRAC_STD] Defined in 9.6.1 ... */
         tmp            =  parse_code & 0x03;                   /* [DIRAC_STD] num_refs()      */

@@ -47,6 +47,7 @@
 #include "diractab.h"
 #include "diracdsp.h"
 #include "videodsp.h"
+#include "hwaccel_internal.h"
 
 #define EDGE_WIDTH 16
 
