@@ -1756,6 +1756,13 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
     if (ret < 0)
         return ret;
 
+    if (avctx->hwaccel) {
+        f->width  = avctx->coded_width;
+        f->height = avctx->coded_height;
+        ret = ff_get_buffer(avctx, f, flags);
+        return ret;
+    }
+
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
     ret = ff_get_buffer(avctx, f, flags);
@@ -2013,14 +2020,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         av_frame_unref(pic->avframe);
-        //
-        // if (s->avctx->hwaccel) {
-        //     const FFHWAccel *hwaccel = ffhwaccel(s->avctx->hwaccel);
-        //     s->hwaccel_picture_private =
-        //         av_mallocz(hwaccel->frame_priv_data_size);
-        //     if (!s->hwaccel_picture_private)
-        //         return AVERROR(ENOMEM);
-        // }
 
 
         /* [DIRAC_STD] Defined in 9.6.1 ... */
@@ -2066,6 +2065,13 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             {
                 av_log(avctx, AV_LOG_ERROR, "The HWaccel only supports VC-2\n");
                 return AVERROR_INVALIDDATA;
+            }
+            if (!s->hwaccel_picture_private) {
+                const FFHWAccel *hwaccel = ffhwaccel(s->avctx->hwaccel);
+                s->hwaccel_picture_private =
+                    av_mallocz(hwaccel->frame_priv_data_size);
+                if (!s->hwaccel_picture_private)
+                    return AVERROR(ENOMEM);
             }
             ret = FF_HW_CALL(s->avctx, start_frame, NULL, 0);
             if (ret < 0)

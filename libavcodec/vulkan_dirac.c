@@ -24,7 +24,6 @@
 
 typedef  struct DiracVulkanDecodeContext {
     FFVulkanContext vkctx;
-    FFVulkanFunctions vkfn;
     VkSamplerYcbcrConversion yuv_sampler;
 
     FFVulkanPipeline wavelet_pl[7];
@@ -38,9 +37,6 @@ typedef  struct DiracVulkanDecodeContext {
 } DiracVulkanDecodeContext;
 
 typedef  struct DiracVulkanDecodePicture {
-    DiracFrame *pic;
-    DiracVulkanDecodeContext *ctx;
-
     VkImageView img_view_ref;
     VkImageView img_view_out;
 
@@ -181,7 +177,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     /* Initialize contexts */
     s = &dec->vkctx;
-    vk = &dec->vkfn;
+    vk = &dec->vkctx.vkfn;
 
     s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
     s->frames = (AVHWFramesContext *)s->frames_ref->data;
@@ -210,16 +206,16 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
         goto fail;
 
     /* Get sampler */
-    // av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
-    // yuv_sampler_info.xChromaOffset = cxpos >> 7;
-    // yuv_sampler_info.yChromaOffset = cypos >> 7;
-    // yuv_sampler_info.format = s->hwfc->format[0];
-    // ret = vk->CreateSamplerYcbcrConversion(s->hwctx->act_dev, &yuv_sampler_info,
-    //                                        s->hwctx->alloc, &dec->yuv_sampler);
-    // if (ret != VK_SUCCESS) {
-    //     err = AVERROR_EXTERNAL;
-    //     goto fail;
-    // }
+    av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
+    yuv_sampler_info.xChromaOffset = cxpos >> 7;
+    yuv_sampler_info.yChromaOffset = cypos >> 7;
+    yuv_sampler_info.format = s->hwfc->format[0];
+    ret = vk->CreateSamplerYcbcrConversion(s->hwctx->act_dev, &yuv_sampler_info,
+                                           s->hwctx->alloc, &dec->yuv_sampler);
+    if (ret != VK_SUCCESS) {
+        err = AVERROR_EXTERNAL;
+        goto fail;
+    }
 
     init_quant_shd(dec, spv, 0);
     init_quant_shd(dec, spv, 1);
@@ -240,7 +236,7 @@ static void free_common(AVCodecContext *avctx)
 {
     DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s = &ctx->vkctx;
-    FFVulkanFunctions *vk = &ctx->vkfn;
+    FFVulkanFunctions *vk = &ctx->vkctx.vkfn;
 
     if (ctx->yuv_sampler)
         vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev, ctx->yuv_sampler,
@@ -277,7 +273,7 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
     AVVulkanFramesContext *hwfc = frames_ctx->hwctx;
     DiracContext *dctx = avctx->priv_data;
 
-    frames_ctx->sw_format = dctx->seq.pix_fmt;
+    frames_ctx->sw_format = avctx->pix_fmt;
 
     err = vulkan_decode_bootstrap(avctx, hw_frames_ctx);
     if (err < 0)
@@ -309,7 +305,7 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
 
 static int vulkan_dirac_create_view(DiracVulkanDecodeContext *dec, VkImageView *dst_view,
                                  VkImageAspectFlags *aspect, AVVkFrame *src,
-                                 VkFormat vkf, int is_current)
+                                 VkFormat vkf)
 {
     VkResult ret;
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
@@ -334,7 +330,7 @@ static int vulkan_dirac_create_view(DiracVulkanDecodeContext *dec, VkImageView *
         .subresourceRange = (VkImageSubresourceRange) {
             .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseArrayLayer = 0,
-            .layerCount     = VK_REMAINING_ARRAY_LAYERS,
+            .layerCount     = 1,
             .levelCount     = 1,
         },
     };
@@ -367,7 +363,7 @@ static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pi
     err = vulkan_dirac_create_view(dec, &vkpic->img_view_out,
                                 &vkpic->img_aspect,
                                 (AVVkFrame *)pic->data[0],
-                                hwfc->format[0], 1);
+                                hwfc->format[0]);
     if (err < 0)
         return err;
 
@@ -379,6 +375,11 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
                                av_unused uint32_t       size)
 {
     av_log(avctx, AV_LOG_INFO, "Start dirac HW frame\n");
+    DiracVulkanDecodeContext *s = avctx->internal->hwaccel_priv_data;
+    DiracContext *c = avctx->priv_data;
+    DiracVulkanDecodePicture *pic = c->hwaccel_picture_private;
+
+    vulkan_dirac_prepare_frame(s, c->current_picture->avframe, pic);
 
     return 0;
 }
@@ -406,5 +407,6 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .decode_params         = &ff_vk_params_invalidate,
     .flush                 = &ff_vk_decode_flush,
     .priv_data_size        = sizeof(DiracVulkanDecodeContext),
-    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
+    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
+    .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
 };
