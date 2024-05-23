@@ -1652,6 +1652,10 @@ static int dirac_decode_frame_internal(DiracContext *s)
     int ret;
 
     if (s->low_delay) {
+        if (s->hq_picture && s->avctx->hwaccel) {
+            ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
+            return ret;
+        }
         /* [DIRAC_STD] 13.5.1 low_delay_transform_data() */
         if (!s->hq_picture) {
             for (comp = 0; comp < 3; comp++) {
@@ -2041,7 +2045,9 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         /* VC-2 Low Delay has a different parse code than the Dirac Low Delay */
         if (s->version.minor == 2 && parse_code == 0x88)
+        {
             s->ld_picture = 1;
+        }
 
         if (s->low_delay && !(s->ld_picture || s->hq_picture) ) {
             av_log(avctx, AV_LOG_ERROR, "Invalid low delay flag\n");
@@ -2049,15 +2055,32 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         if ((ret = get_buffer_with_edge(avctx, pic->avframe, (parse_code & 0x0C) == 0x0C ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
+        {
             return ret;
+        }
         s->current_picture = pic;
-        s->plane[0].stride = pic->avframe->linesize[0];
-        s->plane[1].stride = pic->avframe->linesize[1];
-        s->plane[2].stride = pic->avframe->linesize[2];
 
-        if (alloc_buffers(s, FFMAX3(FFABS(s->plane[0].stride), FFABS(s->plane[1].stride), FFABS(s->plane[2].stride))) < 0)
-            return AVERROR(ENOMEM);
+        if (s->avctx->hwaccel)
+        {
+            if (!(s->low_delay && s->hq_picture))
+            {
+                av_log(avctx, AV_LOG_ERROR, "The HWaccel only supports VC-2\n");
+                return AVERROR_INVALIDDATA;
+            }
+            ret = FF_HW_CALL(s->avctx, start_frame, NULL, 0);
+            if (ret < 0)
+            {
+                return ret;
+            }
+        } else
+        {
+            s->plane[0].stride = pic->avframe->linesize[0];
+            s->plane[1].stride = pic->avframe->linesize[1];
+            s->plane[2].stride = pic->avframe->linesize[2];
 
+            if (alloc_buffers(s, FFMAX3(FFABS(s->plane[0].stride), FFABS(s->plane[1].stride), FFABS(s->plane[2].stride))) < 0)
+                return AVERROR(ENOMEM);
+        }
         /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
         ret = dirac_decode_picture_header(s);
         if (ret < 0)

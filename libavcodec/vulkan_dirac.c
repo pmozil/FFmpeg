@@ -40,6 +40,17 @@ typedef  struct DiracVulkanDecodeContext {
 typedef  struct DiracVulkanDecodePicture {
     DiracFrame *pic;
     DiracVulkanDecodeContext *ctx;
+
+    VkImageView img_view_ref;
+    VkImageView img_view_out;
+
+    VkImageAspectFlags              img_aspect;
+
+    VkSemaphore                     sem;
+    uint64_t                        sem_value;
+
+    PFN_vkWaitSemaphores            wait_semaphores;
+    PFN_vkDestroyImageView          destroy_image_view;
 } DiracVulkanDecodePicture;
 
 static const char dequant_16bit[] = {
@@ -296,14 +307,96 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
 //     // ff_vk_decode_free_frame(hwctx, &hp->vp);
 // }
 
+static int vulkan_dirac_create_view(DiracVulkanDecodeContext *dec, VkImageView *dst_view,
+                                 VkImageAspectFlags *aspect, AVVkFrame *src,
+                                 VkFormat vkf, int is_current)
+{
+    VkResult ret;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+    VkImageAspectFlags aspect_mask = ff_vk_aspect_bits_from_vkfmt(vkf);
+
+    VkSamplerYcbcrConversionInfo yuv_sampler_info = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO,
+        .conversion = dec->yuv_sampler,
+    };
+    VkImageViewCreateInfo img_view_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = &yuv_sampler_info,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        .format = vkf,
+        .image = src->img[0],
+        .components = (VkComponentMapping) {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange = (VkImageSubresourceRange) {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseArrayLayer = 0,
+            .layerCount     = VK_REMAINING_ARRAY_LAYERS,
+            .levelCount     = 1,
+        },
+    };
+
+    ret = vk->CreateImageView(dec->vkctx.hwctx->act_dev, &img_view_create_info,
+                              dec->vkctx.hwctx->alloc, dst_view);
+    if (ret != VK_SUCCESS)
+        return AVERROR_EXTERNAL;
+
+    *aspect = aspect_mask;
+
+    return 0;
+}
+
+static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pic,
+                               DiracVulkanDecodePicture *vkpic)
+{
+    int err;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+
+    vkpic->img_view_ref  = VK_NULL_HANDLE;
+    vkpic->img_view_out  = VK_NULL_HANDLE;
+
+    vkpic->destroy_image_view = vk->DestroyImageView;
+    vkpic->wait_semaphores = vk->WaitSemaphores;
+
+    AVHWFramesContext *frames = (AVHWFramesContext *)pic->hw_frames_ctx->data;
+    AVVulkanFramesContext *hwfc = frames->hwctx;
+
+    err = vulkan_dirac_create_view(dec, &vkpic->img_view_out,
+                                &vkpic->img_aspect,
+                                (AVVkFrame *)pic->data[0],
+                                hwfc->format[0], 1);
+    if (err < 0)
+        return err;
+
+    return 0;
+}
+
+static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
+                               av_unused const uint8_t *buffer,
+                               av_unused uint32_t       size)
+{
+    av_log(avctx, AV_LOG_INFO, "Start dirac HW frame\n");
+
+    return 0;
+}
+
+static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
+    av_log(avctx, AV_LOG_INFO, "End dirac HW frame\n");
+
+    return 0;
+}
+
 const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .p.name                = "dirac_vulkan",
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_DIRAC,
     .p.pix_fmt             = AV_PIX_FMT_VULKAN,
-    // .start_frame           = &vk_h264_start_frame,
+    .start_frame           = &vulkan_dirac_start_frame,
+    .end_frame             = &vulkan_dirac_end_frame,
     // .decode_slice          = &vk_h264_decode_slice,
-    // .end_frame             = &vk_h264_end_frame,
     // .free_frame_priv       = &vulkan_dirac_free_frame_priv,
     .uninit                = &vulkan_dirac_uninit,
     .init                  = &vulkan_dirac_init,
