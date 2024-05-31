@@ -263,10 +263,15 @@ typedef struct SliceCoeffs {
     int tot;
 } SliceCoeffs;
 
-typedef struct SliceCoeffsPuchConst {
-    int tot;
+typedef struct SliceCoeffsPushConst {
+    int left;
+    int top;
+    int tot_h;
+    int tot_v;
+    int off;
+    int plane;
     int quant_shift;
     int quant_scale;
-} SliceCoeffsPuchConst;
+} SliceCoeffsPushConst;
 
 #endif

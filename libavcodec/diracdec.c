@@ -677,9 +677,9 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
-                                                   qfactor[level][orientation],
-                                                   qoffset[level][orientation],
-                                                   c->tot_v, c->tot_h);
+                                                    qfactor[level][orientation],
+                                                    qoffset[level][orientation],
+                                                    c->tot_v, c->tot_h);
 
                 off += c->tot << (s->pshift + 1);
             }
@@ -693,7 +693,7 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
 
 static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
-    int i;
+    int i, err;
     const DiracContext *s = avctx->priv_data;
     DiracSlice *slices = ((DiracSlice *)arg) + s->num_x*jobnr;
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
@@ -1652,10 +1652,6 @@ static int dirac_decode_frame_internal(DiracContext *s)
     int ret;
 
     if (s->low_delay) {
-        if (s->hq_picture && s->avctx->hwaccel) {
-            ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
-            return ret;
-        }
         /* [DIRAC_STD] 13.5.1 low_delay_transform_data() */
         if (!s->hq_picture) {
             for (comp = 0; comp < 3; comp++) {
@@ -1666,6 +1662,11 @@ static int dirac_decode_frame_internal(DiracContext *s)
         if (!s->zero_res) {
             if ((ret = decode_lowdelay(s)) < 0)
                 return ret;
+        }
+
+        if (s->hq_picture && s->avctx->hwaccel) {
+            ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
+            return ret;
         }
     }
 
