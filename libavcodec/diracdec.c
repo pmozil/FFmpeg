@@ -216,7 +216,8 @@ static av_cold int dirac_decode_end(AVCodecContext *avctx)
     for (i = 0; i < MAX_FRAMES; i++)
         av_frame_free(&s->all_frames[i].avframe);
 
-    av_freep(&s->thread_buf);
+    if (!avctx->hwaccel)
+        av_freep(&s->thread_buf);
     av_freep(&s->slice_params_buf);
 
     return 0;
@@ -693,7 +694,7 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
 
 static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
-    int i, err;
+    int i;
     const DiracContext *s = avctx->priv_data;
     DiracSlice *slices = ((DiracSlice *)arg) + s->num_x*jobnr;
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
@@ -782,7 +783,10 @@ static int decode_lowdelay(DiracContext *s)
             return AVERROR_INVALIDDATA;
         }
 
-        avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
+        if (s->avctx->hwaccel)
+            FF_HW_CALL(s->avctx, decode_slice, (uint8_t *)slices, s->num_y);
+        else
+            avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
     } else {
         for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
             for (slice_x = 0; bufsize > 0 && slice_x < s->num_x; slice_x++) {
