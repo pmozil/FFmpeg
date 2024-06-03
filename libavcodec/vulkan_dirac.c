@@ -38,9 +38,9 @@ typedef  struct DiracVulkanDecodeContext {
     FFVkExecPool exec_pool;
 
     FFVkQueueFamilyCtx upload_qf;
+    FFVkExecPool upload_exec_pool;
 
-    FFVkBuffer *thread_buf_vk;
-    AVBufferRef *thread_buf_vk_ref;
+    FFVkBuffer thread_buf_vk;
     uint8_t *thread_buf_ptr;
     uint8_t *mapped_thread_buf_ptr;
     size_t offset;
@@ -71,20 +71,6 @@ static const char dequant[] = {
     C(1,     } else if (val > 0) {                                 )
     C(2,         val = ((val*qf + qs) >> 2);                       )
     C(1,     }                                                     )
-    // C(1,     vec4 vals = imageLoad(out_img[plane], pos);           )
-    // C(1,     switch (plane) {                                      )
-    // C(2,         case 0:                                           )
-    // C(3,             vals.x = float(val);                          )
-    // C(3,             break;                                        )
-    // C(2,         case 1:                                           )
-    // C(3,             vals.y = float(val);                          )
-    // C(3,             break;                                        )
-    // C(2,         case 2:                                           )
-    // C(3,             vals.z = float(val);                          )
-    // C(3,             break;                                        )
-    // C(2,         default:                                          )
-    // C(3,             break;                                        )
-    // C(1,     }                                                     )
     C(1,     imageStore(out_img[plane], pos, vec4(val));           )
     C(0, }                                                         )
 };
@@ -99,10 +85,10 @@ static void free_common(AVCodecContext *avctx)
     // if (ctx->exec_pool.cmd_bufs) {
     //     ff_vk_exec_pool_free(&ctx->vkctx, &ctx->exec_pool);
     // }
-
+    //
     // for (int i = 0; i < MAX_AUTO_THREADS; i++) {
-        // ff_vk_pipeline_free(s, &ctx->quant_pl[i]);
-        // ff_vk_shader_free(s, &ctx->quant_shd[i]);
+    //     ff_vk_pipeline_free(s, &ctx->quant_pl[i]);
+    //     ff_vk_shader_free(s, &ctx->quant_shd[i]);
     // }
 
     // for (int i = 0; i < 7; i++) {
@@ -116,13 +102,68 @@ static void free_common(AVCodecContext *avctx)
     // if (ctx->sampler)
     //     vk->DestroySampler(s->hwctx->act_dev, ctx->sampler, s->hwctx->alloc);
 
-    if (ctx->thread_buf_vk_ref) {
+    if (ctx->thread_buf_ptr) {
         // ff_vk_unmap_buffer(&ctx->vkctx, ctx->thread_buf_vk, 0);
-        av_buffer_unref(&ctx->thread_buf_vk_ref);
+        // av_buffer_unref(&ctx->thread_buf_vk_ref);
+        ff_vk_free_buf(&ctx->vkctx, &ctx->thread_buf_vk);
     }
 
-    ff_vk_uninit(s);
+    // ff_vk_uninit(s);
 }
+
+
+static int alloc_thread_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    FFVulkanContext *s = &dec->vkctx;
+    FFVulkanFunctions *vk = &s->vkfn;
+    VkExternalMemoryBufferCreateInfo create_desc = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+    };
+
+    VkImportMemoryHostPointerInfoEXT import_desc = {
+        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+    };
+
+    VkMemoryHostPointerPropertiesEXT p_props = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+    };
+
+    size_t offs;
+    size_t req_size;
+    int err;
+
+    av_size_mult(ctx->threads_num_buf, ctx->thread_buf_size, &req_size);
+
+    offs = (uintptr_t)ctx->thread_buf % s->hprops.minImportedHostPointerAlignment;
+    import_desc.pHostPointer = ctx->thread_buf - offs;
+    req_size = FFALIGN(offs + req_size,
+                s->hprops.minImportedHostPointerAlignment);
+
+    err = vk->GetMemoryHostPointerPropertiesEXT(s->hwctx->act_dev,
+                                                import_desc.handleType,
+                                                import_desc.pHostPointer,
+                                                &p_props);
+
+    if (dec->thread_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->thread_buf_vk);
+    }
+
+    err = ff_vk_create_buf(&dec->vkctx, &dec->thread_buf_vk, req_size,
+                            &create_desc,
+                            &import_desc,
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (err < 0)
+        return err;
+
+    dec->thread_buf_ptr = ctx->thread_buf;
+    dec->offset = offs;
+
+    return ff_vk_map_buffer(&dec->vkctx, &dec->thread_buf_vk, &dec->mapped_thread_buf_ptr, 0);
+}
+
 
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
                           FFVkSPIRVShader *shd, FFVulkanPipeline *pl)
@@ -211,65 +252,9 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx) {
     return 0;
 }
 
-static int alloc_thread_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
-    FFVulkanContext *s = &dec->vkctx;
-    FFVulkanFunctions *vk = &s->vkfn;
-    VkExternalMemoryBufferCreateInfo create_desc = {
-        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-    };
-
-    VkImportMemoryHostPointerInfoEXT import_desc = {
-        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-    };
-
-    VkMemoryHostPointerPropertiesEXT p_props = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
-    };
-
-    size_t offs;
-    size_t req_size;
-    int err;
-
-    av_size_mult(ctx->threads_num_buf, ctx->thread_buf_size, &req_size);
-    offs = (uintptr_t)ctx->thread_buf % s->hprops.minImportedHostPointerAlignment;
-    import_desc.pHostPointer = ctx->thread_buf - offs;
-    req_size = FFALIGN(offs + req_size,
-                s->hprops.minImportedHostPointerAlignment);
-
-    err = vk->GetMemoryHostPointerPropertiesEXT(s->hwctx->act_dev,
-                                                import_desc.handleType,
-                                                import_desc.pHostPointer,
-                                                &p_props);
-
-    if (dec->thread_buf_vk_ref) {
-        av_buffer_unref(&dec->thread_buf_vk_ref);
-    }
-
-    err = ff_vk_create_avbuf(&dec->vkctx, &dec->thread_buf_vk_ref, req_size,
-                            &create_desc,
-                            &import_desc,
-                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (err < 0)
-        return err;
-
-    dec->thread_buf_vk = (FFVkBuffer *)dec->thread_buf_vk_ref->data;
-    dec->thread_buf_ptr = ctx->thread_buf;
-    dec->offset = offs;
-
-    err = ff_vk_map_buffer(&dec->vkctx, dec->thread_buf_vk, &dec->mapped_thread_buf_ptr, 0);
-    if (err < 0)
-        return err;
-
-    return 0;
-}
-
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
-    int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
+int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
     VkResult ret;
     DiracContext *ctx = avctx->priv_data;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
@@ -350,6 +335,8 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
     dec->thread_buf_ptr = NULL;
+
+    return 0;
 
 fail:
     if (spv)
@@ -455,6 +442,7 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
 
 static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     // av_log(avctx, AV_LOG_INFO, "End dirac HW frame\n");
+    DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
     DiracContext *ctx = avctx->priv_data;
     DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
 
@@ -473,7 +461,7 @@ static int vulkan_dirac_update_thread_context(AVCodecContext *dst, const AVCodec
     dst_ctx->yuv_sampler = src_ctx->yuv_sampler;
     dst_ctx->sampler = src_ctx->sampler;
     for (int j = 0; j < MAX_AUTO_THREADS; j++) {
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 7; i++) {
             dst_ctx->wavelet_pl[i][j] = src_ctx->wavelet_pl[i][j];
             dst_ctx->wavelet_shd[i][j] = src_ctx->wavelet_shd[i][j];
         }
