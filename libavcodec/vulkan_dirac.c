@@ -28,8 +28,8 @@ typedef  struct DiracVulkanDecodeContext {
     VkSamplerYcbcrConversion yuv_sampler;
     VkSampler sampler;
 
-    FFVulkanPipeline wavelet_pl[7][MAX_AUTO_THREADS];
-    FFVkSPIRVShader wavelet_shd[7][MAX_AUTO_THREADS];
+    FFVulkanPipeline wavelet_pl[MAX_AUTO_THREADS];
+    FFVkSPIRVShader wavelet_shd[MAX_AUTO_THREADS];
 
     FFVulkanPipeline quant_pl[MAX_AUTO_THREADS];
     FFVkSPIRVShader quant_shd[MAX_AUTO_THREADS];
@@ -37,13 +37,19 @@ typedef  struct DiracVulkanDecodeContext {
     FFVkQueueFamilyCtx qf;
     FFVkExecPool exec_pool;
 
-    FFVkQueueFamilyCtx upload_qf;
-    FFVkExecPool upload_exec_pool;
-
     FFVkBuffer thread_buf_vk;
     uint8_t *thread_buf_ptr;
     uint8_t *mapped_thread_buf_ptr;
     size_t offset;
+
+    AVBufferPool *quant_buf_pool;
+    AVBufferPool *slice_coeff_buf_pool;
+
+    AVBufferRef *av_quant_bufs[MAX_AUTO_THREADS];
+    AVBufferRef *av_slice_coeffs_bufs[MAX_AUTO_THREADS];
+
+    FFVkBuffer *quant_bufs[MAX_AUTO_THREADS];
+    FFVkBuffer *slice_coeffs_bufs[MAX_AUTO_THREADS];
 } DiracVulkanDecodeContext;
 
 typedef  struct DiracVulkanDecodePicture {
@@ -56,10 +62,6 @@ typedef  struct DiracVulkanDecodePicture {
     PFN_vkWaitSemaphores            wait_semaphores;
     PFN_vkDestroyImageView          destroy_image_view;
 
-    FFVkExecContext *exec;
-    SliceCoeffsPushConst push_c;
-
-    AVBufferPool *buf_pool;
     DiracFrame *frame;
 } DiracVulkanDecodePicture;
 
@@ -77,40 +79,86 @@ static const char dequant[] = {
 
 static void free_common(AVCodecContext *avctx)
 {
-    DiracVulkanDecodeContext *ctx = avctx->internal->hwaccel_priv_data;
-    FFVulkanContext *s = &ctx->vkctx;
-    // FFVulkanFunctions *vk = &ctx->vkctx.vkfn;
+    DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
+    // FFVulkanContext *s = &dec->vkctx;
+    // FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
     /* Wait on and free execution pool */
-    // if (ctx->exec_pool.cmd_bufs) {
-    //     ff_vk_exec_pool_free(&ctx->vkctx, &ctx->exec_pool);
+    // if (dec->exec_pool.cmd_bufs) {
+    //     ff_vk_exec_pool_free(&dec->vkctx, &dec->exec_pool);
     // }
     //
     // for (int i = 0; i < MAX_AUTO_THREADS; i++) {
-    //     ff_vk_pipeline_free(s, &ctx->quant_pl[i]);
-    //     ff_vk_shader_free(s, &ctx->quant_shd[i]);
-    // }
-
-    // for (int i = 0; i < 7; i++) {
+    //     ff_vk_pipeline_free(s, &dec->quant_pl[i]);
+    //     ff_vk_shader_free(s, &dec->quant_shd[i]);
+    //
     //     ff_vk_pipeline_free(&dec->vkctx, &dec->wavelet_pl[i]);
     //     ff_vk_shader_free(&dec->vkctx, &dec->wavelet_shd[i]);
     // }
-    //
-    // if (ctx->yuv_sampler)
-    //     vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev, ctx->yuv_sampler,
-    //                                       s->hwctx->alloc);
-    // if (ctx->sampler)
-    //     vk->DestroySampler(s->hwctx->act_dev, ctx->sampler, s->hwctx->alloc);
 
-    if (ctx->thread_buf_ptr) {
-        // ff_vk_unmap_buffer(&ctx->vkctx, ctx->thread_buf_vk, 0);
-        // av_buffer_unref(&ctx->thread_buf_vk_ref);
-        ff_vk_free_buf(&ctx->vkctx, &ctx->thread_buf_vk);
+    //
+    // if (dec->yuv_sampler)
+    //     vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev, dec->yuv_sampler,
+    //                                       s->hwctx->alloc);
+    // if (dec->sampler)
+    //     vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
+
+    if (dec->thread_buf_ptr) {
+        // ff_vk_unmap_buffer(&dec->vkctx, dec->thread_buf_vk, 0);
+        // av_buffer_unref(&dec->thread_buf_vk_ref);
+        ff_vk_free_buf(&dec->vkctx, &dec->thread_buf_vk);
     }
+
+    if (dec->slice_coeff_buf_pool)
+        av_buffer_pool_uninit(&dec->slice_coeff_buf_pool);
+
+    if (dec->quant_buf_pool)
+        av_buffer_pool_uninit(&dec->quant_buf_pool);
 
     // ff_vk_uninit(s);
 }
 
+static int alloc_data_bufs(DiracVulkanDecodeContext *dec) {
+    int err;
+    for (int i = 0; i < MAX_AUTO_THREADS; i++) {
+        err = ff_vk_get_pooled_buffer(&dec->vkctx, &dec->quant_buf_pool,
+                                        &dec->av_quant_bufs[i],
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                        NULL,
+                                        MAX_DWT_LEVELS * 8,
+                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (err < 0)
+            goto free_quants;
+        dec->quant_bufs[i] = (FFVkBuffer *)dec->av_quant_bufs[i]->data;
+
+        err = ff_vk_get_pooled_buffer(&dec->vkctx, &dec->slice_coeff_buf_pool,
+                                        &dec->av_slice_coeffs_bufs[i],
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                        NULL,
+                                        MAX_DWT_LEVELS * sizeof(SliceCoeffs),
+                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (err < 0)
+            goto free_slices;
+        dec->slice_coeffs_bufs[i] = (FFVkBuffer *)dec->av_slice_coeffs_bufs[i]->data;
+
+    }
+
+    return 0;
+
+free_slices:
+    if (dec->slice_coeff_buf_pool)
+        av_buffer_pool_uninit(&dec->slice_coeff_buf_pool);
+
+free_quants:
+    if (dec->quant_buf_pool)
+        av_buffer_pool_uninit(&dec->quant_buf_pool);
+
+    return err;
+}
 
 static int alloc_thread_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     FFVulkanContext *s = &dec->vkctx;
@@ -256,7 +304,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 {
 int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
     VkResult ret;
-    DiracContext *ctx = avctx->priv_data;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s;
     FFVulkanFunctions *vk;
@@ -306,12 +353,6 @@ int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
     if (err < 0)
         goto fail;
 
-    nb_q = 0;
-    qf = ff_vk_qf_init(s, &dec->upload_qf, VK_QUEUE_TRANSFER_BIT);
-
-    if (s->query_props[qf].queryResultStatusSupport)
-        nb_q = 1;
-
     /* Get sampler */
     av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
     yuv_sampler_info.xChromaOffset = cxpos >> 7;
@@ -335,6 +376,10 @@ int err = 0, qf, cxpos = 0, cypos = 0, nb_q = 0;
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
     dec->thread_buf_ptr = NULL;
+
+    err = alloc_data_bufs(dec);
+    if (err < 0)
+        goto fail;
 
     return 0;
 
@@ -371,7 +416,6 @@ static int vulkan_decode_bootstrap(AVCodecContext *avctx, AVBufferRef *frames_re
 static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
 {
     int err;
-    VkFormat vkfmt;
     AVHWFramesContext *frames_ctx = (AVHWFramesContext*)hw_frames_ctx->data;
     AVVulkanFramesContext *hwfc = frames_ctx->hwctx;
     // DiracContext *dctx = avctx->priv_data;
@@ -386,12 +430,12 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
     frames_ctx->height = avctx->coded_height;
     frames_ctx->format = AV_PIX_FMT_VULKAN;
 
-    hwfc->format[0]    = vkfmt;
+    for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+        hwfc->format[i]    = av_vkfmt_from_pixfmt(frames_ctx->sw_format)[i];
+    }
     hwfc->tiling       = VK_IMAGE_TILING_OPTIMAL;
     hwfc->usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
-                         VK_IMAGE_USAGE_STORAGE_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                         VK_IMAGE_USAGE_STORAGE_BIT;
 
     return err;
 }
@@ -409,15 +453,8 @@ static void vulkan_dirac_free_frame_priv(FFRefStructOpaque _hwctx, void *data)
 static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pic,
                                DiracVulkanDecodePicture *vkpic)
 {
-    int err;
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
     vkpic->wait_semaphores = vk->WaitSemaphores;
-    vkpic->exec = ff_vk_exec_get(&dec->exec_pool);
-
-    err = ff_vk_create_imageviews(&dec->vkctx, vkpic->exec, vkpic->views, vkpic->frame->avframe);
-    if (err < 0) {
-        return err;
-    }
 
     return 0;
 }
@@ -442,11 +479,9 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
 
 static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     // av_log(avctx, AV_LOG_INFO, "End dirac HW frame\n");
-    DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
-    DiracContext *ctx = avctx->priv_data;
-    DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
-
-    av_buffer_pool_uninit(&pic->buf_pool);
+    // DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
+    // DiracContext *ctx = avctx->priv_data;
+    // DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
 
     return 0;
 }
@@ -461,10 +496,9 @@ static int vulkan_dirac_update_thread_context(AVCodecContext *dst, const AVCodec
     dst_ctx->yuv_sampler = src_ctx->yuv_sampler;
     dst_ctx->sampler = src_ctx->sampler;
     for (int j = 0; j < MAX_AUTO_THREADS; j++) {
-        for (int i = 0; i < 7; i++) {
-            dst_ctx->wavelet_pl[i][j] = src_ctx->wavelet_pl[i][j];
-            dst_ctx->wavelet_shd[i][j] = src_ctx->wavelet_shd[i][j];
-        }
+        dst_ctx->wavelet_pl[j] = src_ctx->wavelet_pl[j];
+        dst_ctx->wavelet_shd[j] = src_ctx->wavelet_shd[j];
+
         dst_ctx->quant_pl[j] = src_ctx->quant_pl[j];
         dst_ctx->quant_shd[j] = src_ctx->quant_shd[j];
     }
@@ -498,12 +532,19 @@ static int subband_coeffs(const DiracContext *s, int x, int y, int p,
     return coef;
 }
 
-static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
+static int decode_hq_slice(const DiracContext *s,
+                           DiracSlice *slice, uint8_t *tmp_buf,
+                           int threadnr)
 {
+    DiracVulkanDecodeContext *dec = s->avctx->internal->hwaccel_priv_data;
     int i, level, orientation, quant_idx;
-    int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
+    int *qfactor = (int *)dec->quant_bufs[threadnr]->mapped_mem;
+    int *qoffset = qfactor + MAX_DWT_LEVELS * 4;
     GetBitContext *gb = &slice->gb;
-    SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
+    SliceCoeffs *coeffs_num = (SliceCoeffs *) dec->slice_coeffs_bufs[threadnr]->mapped_mem;
+    DiracVulkanDecodePicture *pic = s->hwaccel_picture_private;
+    SliceCoeffsPushConst push_c;
+    push_c.off = (s->thread_buf_size * threadnr) >> 2;
 
     skip_bits_long(gb, 8*s->highquality.prefix_bytes);
     quant_idx = get_bits(gb, 8);
@@ -517,8 +558,8 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
     for (level = 0; level < s->wavelet_depth; level++) {
         for (orientation = !!level; orientation < 4; orientation++) {
             const int quant = FFMAX(quant_idx - s->lowdelay.quant[level][orientation], 0);
-            qfactor[level][orientation] = ff_dirac_qscale_tab[quant];
-            qoffset[level][orientation] = ff_dirac_qoffset_intra_tab[quant] + 2;
+            qfactor[level * MAX_DWT_LEVELS + orientation] = ff_dirac_qscale_tab[quant];
+            qoffset[level * MAX_DWT_LEVELS + orientation] = ff_dirac_qoffset_intra_tab[quant] + 2;
         }
     }
 
@@ -527,6 +568,7 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
         int64_t length = s->highquality.size_scaler*get_bits(gb, 8);
         int64_t bits_end = get_bits_count(gb) + 8*length;
         const uint8_t *addr = align_get_bits(gb);
+        push_c.plane = i;
 
         if (length*8 > get_bits_left(gb)) {
             av_log(s->avctx, AV_LOG_ERROR, "end too far away\n");
@@ -543,23 +585,6 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
             const int end_b   = coef_num * (1 << (s->pshift + 1));
             memset(&tmp_buf[start_b], 0, end_b - start_b);
         }
-
-        // for (level = 0; level < s->wavelet_depth; level++) {
-        //     const SliceCoeffs *c = &coeffs_num[level];
-        //     for (orientation = !!level; orientation < 4; orientation++) {
-        //         const SubBand *b1 = &s->plane[i].band[level][orientation];
-        //         uint8_t *buf = b1->ibuf + c->top * b1->stride + (c->left << (s->pshift + 1));
-        //
-        //         /* Change to c->tot_h <= 4 for AVX2 dequantization */
-        //         const int qfunc = s->pshift + 2*(c->tot_h <= 2);
-        //         s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
-        //                                             qfactor[level][orientation],
-        //                                             qoffset[level][orientation],
-        //                                             c->tot_v, c->tot_h);
-        //
-        //         off += c->tot << (s->pshift + 1);
-        //     }
-        // }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
@@ -580,7 +605,7 @@ static int vulkan_dirac_decode_slice_row(AVCodecContext *avctx,
     thread_buf = &dec->mapped_thread_buf_ptr[s->thread_buf_size*threadnr];
 
     for (i = 0; i < s->num_x; i++) {
-        err = decode_hq_slice(s, &slices[i], thread_buf);
+        err = decode_hq_slice(s, &slices[i], thread_buf, threadnr);
         if (err < 0)
             return err;
     }
