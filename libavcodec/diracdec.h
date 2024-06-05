@@ -266,6 +266,7 @@ typedef struct SliceCoeffs {
 typedef struct SliceCoeffsPushConst {
     int off;
     int plane;
+    int wavelet_depth;
 } SliceCoeffsPushConst;
 
 #endif
