@@ -216,9 +216,11 @@ static av_cold int dirac_decode_end(AVCodecContext *avctx)
     for (i = 0; i < MAX_FRAMES; i++)
         av_frame_free(&s->all_frames[i].avframe);
 
-    if (!avctx->hwaccel)
-        av_freep(&s->thread_buf);
+    av_freep(&s->thread_buf);
     av_freep(&s->slice_params_buf);
+    if (s->hwaccel_picture_private) {
+        av_freep(s->hwaccel_picture_private);
+    }
 
     return 0;
 }
