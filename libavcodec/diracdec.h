@@ -264,9 +264,13 @@ typedef struct SliceCoeffs {
 } SliceCoeffs;
 
 typedef struct SliceCoeffsPushConst {
-    int off;
-    int plane;
     int wavelet_depth;
 } SliceCoeffsPushConst;
+
+typedef struct DiracSliceVkBuf {
+    int idx;
+    int off;
+    SliceCoeffs slices[3 * MAX_DWT_LEVELS];
+} DiracSliceVkBuf;
 
 #endif
