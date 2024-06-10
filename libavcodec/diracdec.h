@@ -147,6 +147,7 @@ typedef struct DiracContext {
     DiracVersionInfo version;
     GetBitContext gb;
     AVDiracSeqHeader seq;
+    enum AVPixelFormat sof_pix_fmt;
     void *hwaccel_picture_private;
     int seen_sequence_header;
     int64_t frame_number;       /* number of the next frame to display       */

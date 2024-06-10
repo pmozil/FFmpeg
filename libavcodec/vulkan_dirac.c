@@ -37,20 +37,22 @@ typedef  struct DiracVulkanDecodeContext {
     FFVkQueueFamilyCtx qf;
     FFVkExecPool exec_pool;
 
+    uint8_t *quant_val_buf_ptr;
+    int quant_val_buf_size;
     int thread_buf_size;
-    int n_threads;
-    FFVkBuffer thread_buf_vk;
-    uint8_t *thread_buf_ptr;
-    int thr_off;
+    FFVkBuffer quant_val_buf_host;
+    FFVkBuffer quant_val_buf_vk;
 
     int n_slice_bufs;
-    FFVkBuffer slice_buf_vk;
     uint8_t *slice_buf_ptr;
-    int slice_off;
+    int slice_buf_size;
+    FFVkBuffer slice_buf_host;
+    FFVkBuffer slice_buf_vk;
 
-    FFVkBuffer quant_buf_vk;
     uint8_t *quant_buf_ptr;
-    int quant_off;
+    int quant_buf_size;
+    FFVkBuffer quant_buf_host;
+    FFVkBuffer quant_buf_vk;
 } DiracVulkanDecodeContext;
 
 typedef  struct DiracVulkanDecodePicture {
@@ -103,18 +105,15 @@ static void free_common(AVCodecContext *avctx)
     // if (dec->sampler)
     //     vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
-    if (dec->thread_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->thread_buf_vk);
-        av_free(dec->thread_buf_ptr);
+    if (dec->quant_val_buf_ptr) {
+        av_free(dec->quant_val_buf_ptr);
     }
 
     if (dec->slice_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_vk);
         av_free(dec->slice_buf_ptr);
     }
 
     if (dec->quant_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_vk);
         av_free(dec->quant_buf_ptr);
     }
 
@@ -122,11 +121,9 @@ static void free_common(AVCodecContext *avctx)
 }
 
 static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
-                                 int *off, uint8_t **mem,
-                                 FFVkBuffer *buf) {
+                                 uint8_t *mem, FFVkBuffer *buf) {
     int err;
     size_t offs;
-    uint8_t *tmp;
 
     FFVulkanContext *s = &dec->vkctx;
     FFVulkanFunctions *vk = &s->vkfn;
@@ -144,18 +141,8 @@ static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
         .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
     };
 
-    if (*mem != NULL) {
-        av_freep(mem);
-    }
-
-    req_size = FFALIGN(req_size, s->hprops.minImportedHostPointerAlignment);
-
-    tmp = av_mallocz(req_size);
-    if (!tmp)
-        return AVERROR(ENOMEM);
-
-    offs = (uintptr_t)tmp % s->hprops.minImportedHostPointerAlignment;
-    import_desc.pHostPointer = tmp - offs;
+    offs = (uintptr_t)mem % s->hprops.minImportedHostPointerAlignment;
+    import_desc.pHostPointer = mem - offs;
     req_size = FFALIGN(offs + req_size,
                 s->hprops.minImportedHostPointerAlignment);
 
@@ -163,10 +150,6 @@ static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
                                                 import_desc.handleType,
                                                 import_desc.pHostPointer,
                                                 &p_props);
-
-    if (buf->buf) {
-        ff_vk_free_buf(&dec->vkctx, &dec->thread_buf_vk);
-    }
 
     err = ff_vk_create_buf(s, buf, req_size,
                             &create_desc,
@@ -177,57 +160,71 @@ static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
     if (err < 0)
         return err;
 
-    *off = offs;
-    *mem = tmp;
     return 0;
 }
 
-static int alloc_data_bufs(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
-    int err, length;
-    size_t slice_buf_size, req_size;
+static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    int err, length = ctx->num_y * ctx->num_x;
 
-    length = ctx->num_y * ctx->num_x;
     dec->n_slice_bufs = length;
-    av_size_mult(length, sizeof(DiracSliceVkBuf), &slice_buf_size);
-    err = alloc_host_mapped_buf(dec, slice_buf_size, &dec->slice_off,
-                          &dec->slice_buf_ptr,
-                          &dec->slice_buf_vk);
+
+    dec->slice_buf_size = sizeof(DiracSliceVkBuf) * length;
+    dec->slice_buf_ptr = av_realloc(dec->slice_buf_ptr, dec->slice_buf_size);
+    if (!dec->slice_buf_ptr)
+        return AVERROR(ENOMEM);
+
+    err = alloc_host_mapped_buf(dec, dec->slice_buf_size,
+                                dec->slice_buf_ptr, &dec->slice_buf_host);
+    if (err < 0)
+        return err;
+    av_log(ctx->avctx, AV_LOG_INFO, "Slice val buf size = %i\n", dec->slice_buf_size);
+
+    return 0;
+}
+
+static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    int err, length = ctx->num_y * ctx->num_x;
+
+    dec->n_slice_bufs = length;
+
+    dec->quant_buf_size = sizeof(int32_t) * MAX_DWT_LEVELS * 8 * length;
+    dec->quant_buf_ptr = av_realloc(dec->quant_buf_ptr, dec->quant_buf_size);
+    if (!dec->quant_buf_ptr)
+        return AVERROR(ENOMEM);
+
+    err = alloc_host_mapped_buf(dec, dec->quant_buf_size,
+                                dec->quant_buf_ptr, &dec->quant_buf_host);
     if (err < 0)
         return err;
 
-    err = alloc_host_mapped_buf(dec,
-                          length * sizeof(int32_t) * MAX_DWT_LEVELS * 8,
-                          &dec->quant_off,
-                          &dec->quant_buf_ptr,
-                          &dec->quant_buf_vk);
+    av_log(ctx->avctx, AV_LOG_INFO, "Dequant val buf size = %i\n", dec->quant_buf_size);
 
-    return err;
+    return 0;
 }
 
-static int alloc_thread_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
-    int err;
+static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    int err, length = ctx->num_y * ctx->num_x;
 
-    av_size_mult(ctx->num_x * ctx->num_y * 3,
-                 ctx->thread_buf_size, &req_size);
+    if (ctx->thread_buf_size < 0)
+        return 0;
 
-    dec->thread_buf_size = req_size;
-    dec->n_threads = ctx->avctx->thread_count;
-    av_size_mult(req_size, ctx->threads_num_buf, &req_size);
-    err = alloc_host_mapped_buf(dec, req_size, &dec->thr_off,
-                          &dec->thread_buf_ptr,
-                          &dec->thread_buf_vk);
+    dec->thread_buf_size = ctx->thread_buf_size;
+
+    dec->quant_val_buf_size = ctx->thread_buf_size * 3 * length;
+    dec->quant_val_buf_ptr = av_realloc(dec->quant_val_buf_ptr, dec->quant_val_buf_size);
+    if (!dec->quant_val_buf_ptr)
+        return AVERROR(ENOMEM);
+
+    err = alloc_host_mapped_buf(dec, dec->quant_val_buf_size,
+                                dec->quant_val_buf_ptr, &dec->quant_val_buf_host);
     if (err < 0)
         return err;
 
-    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 0, 0, 0,
-                                    dec->thread_buf_vk.address,
-                                    dec->thread_buf_vk.size,
-                                    VK_FORMAT_UNDEFINED);
+    av_log(ctx->avctx, AV_LOG_INFO, "Thread buf size = %i\n", ctx->thread_buf_size);
+    av_log(ctx->avctx, AV_LOG_INFO, "Quant val buf size = %i\n", dec->quant_val_buf_size);
 
-    return err;
+    return 0;
 }
-
 
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
 {
@@ -427,10 +424,13 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
-    dec->thread_buf_ptr = NULL;
-    dec->slice_buf_ptr  = NULL;
-    dec->quant_buf_ptr  = NULL;
     init_quant_shd(dec, spv);
+
+    dec->quant_val_buf_ptr = NULL;
+    dec->slice_buf_ptr = NULL;
+    dec->quant_buf_ptr = NULL;
+    dec->thread_buf_size = 0;
+    dec->n_slice_bufs = 0;
 
     return 0;
 
@@ -469,9 +469,9 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
     int err;
     AVHWFramesContext *frames_ctx = (AVHWFramesContext*)hw_frames_ctx->data;
     AVVulkanFramesContext *hwfc = frames_ctx->hwctx;
-    // DiracContext *dctx = avctx->priv_data;
+    DiracContext *s = avctx->priv_data;
 
-    frames_ctx->sw_format = avctx->pix_fmt;
+    frames_ctx->sw_format = s->sof_pix_fmt;
 
     err = vulkan_decode_bootstrap(avctx, hw_frames_ctx);
     if (err < 0)
@@ -527,16 +527,23 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
         return err;
     }
 
-    if (
-        s->thread_buf_ptr == NULL ||
+    if (s->quant_buf_ptr == NULL ||
         s->slice_buf_ptr == NULL ||
-        s->quant_buf_ptr == NULL ||
+        s->quant_val_buf_ptr == NULL ||
         c->num_x * c->num_y != s->n_slice_bufs) {
-        err = alloc_data_bufs(c, s);
+        err = alloc_dequant_buf(c, s);
         if (err < 0)
-            return 0;
+            return err;
+        err = alloc_slices_buf(c, s);
+        if (err < 0)
+            return err;
+        err = alloc_quant_buf(c, s);
+        if (err < 0)
+            return err;
+    }
 
-        err = alloc_thread_buf(c, s);
+    if (s->thread_buf_size != c->thread_buf_size) {
+        err = alloc_quant_buf(c, s);
         if (err < 0)
             return 0;
     }
@@ -584,21 +591,20 @@ static int subband_coeffs(const DiracContext *s, int x, int y, int p,
     return coef;
 }
 
-static int decode_hq_slice(const DiracContext *s,
-                           DiracSlice *slice, uint8_t *tmp_buf, int jobnr,
-                           int threadnr)
+static inline int decode_hq_slice(const DiracContext *s, int jobnr)
 {
-    DiracVulkanDecodeContext *dec = s->avctx->internal->hwaccel_priv_data;
     int i, level, orientation, quant_idx;
-    int *qfactor =
-        ((int *)dec->quant_buf_ptr)
-        + (MAX_DWT_LEVELS * 8 * jobnr);
-    int *qoffset = qfactor + MAX_DWT_LEVELS * 4;
-    DiracSliceVkBuf *slice_vk =
-        ((DiracSliceVkBuf *)dec->slice_buf_ptr)
-        + jobnr;
-    SliceCoeffs *coeffs_num = slice_vk->slices;
+    DiracVulkanDecodeContext *dec = s->avctx->internal->hwaccel_priv_data;
+    int *qfactor = ((int *) dec->quant_buf_ptr) + jobnr * 8 * MAX_DWT_LEVELS;
+    int *qoffset = qfactor + 4 * MAX_DWT_LEVELS;
+
+    // int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
+    // uint8_t *tmp_buf = s->thread_buf;
+    uint8_t *quant_val_base = (uint8_t *)dec->quant_val_buf_ptr;
+    uint8_t *tmp_buf = &quant_val_base[s->thread_buf_size * 3 * jobnr];
+    DiracSlice *slice = &s->slice_params_buf[jobnr];
     GetBitContext *gb = &slice->gb;
+    SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
 
     skip_bits_long(gb, 8*s->highquality.prefix_bytes);
     quant_idx = get_bits(gb, 8);
@@ -617,8 +623,9 @@ static int decode_hq_slice(const DiracContext *s,
         }
     }
 
+    /* Luma + 2 Chroma planes */
     for (i = 0; i < 3; i++) {
-        int coef_num, coef_par;
+        int coef_num, coef_par, off = 0;
         int64_t length = s->highquality.size_scaler*get_bits(gb, 8);
         int64_t bits_end = get_bits_count(gb) + 8*length;
         const uint8_t *addr = align_get_bits(gb);
@@ -640,53 +647,19 @@ static int decode_hq_slice(const DiracContext *s,
         }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
-        coeffs_num += MAX_DWT_LEVELS;
-
-        // FFVkExecContext *exec;
-        // VkImageView views[AV_NUM_DATA_POINTERS];
-
-        // exec = ff_vk_exec_get(&dec->exec_pools[threadnr]);
-        //
-        // ff_vk_exec_start(&dec->vkctx, exec);
-
-        // ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl[threadnr]);
-        //
-        // ff_vk_create_imageviews(&dec->vkctx, NULL, views, pic->frame->avframe);
-        //
-        // ff_vk_update_push_exec(&dec->vkctx, exec,
-        //                        &dec->quant_pl[threadnr], VK_SHADER_STAGE_COMPUTE_BIT,
-        //                        0, sizeof(push_c), &push_c);
-        //
-        // ff_vk_update_descriptor_img_array(&dec->vkctx, &dec->quant_pl[threadnr],
-        //                               exec, pic->frame->avframe, views, 1, 0,
-        //                               VK_IMAGE_LAYOUT_GENERAL,
-        //                               VK_NULL_HANDLE);
-        //
-        // vk->CmdDispatch(exec->buf, 32, 32, 1);
-
-        // ff_vk_exec_submit(&dec->vkctx, exec);
     }
 
     return 0;
 }
 
-static int vulkan_dirac_decode_slice_row(AVCodecContext *avctx,
-                                        void  *arg, int jobnr,
-                                        int threadnr)
+static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
-    int i, err;
-    DiracContext *s = avctx->priv_data;
-    DiracSlice *slices = ((DiracSlice *)arg) + s->num_x*jobnr;
-    DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
-    uint8_t *thread_buf = &dec->thread_buf_ptr[dec->thread_buf_size*threadnr];
+    const DiracContext *s = avctx->priv_data;
+    int i, jobn = s->num_x * jobnr;
 
     for (i = 0; i < s->num_x; i++) {
-        err = decode_hq_slice(s, &slices[i],
-                              thread_buf,
-                              s->num_x * jobnr + i,
-                              threadnr);
-        if (err < 0)
-            return err;
+        decode_hq_slice(s, jobn);
+        jobn++;
     }
 
     return 0;
@@ -696,10 +669,17 @@ static int vulkan_dirac_decode_slice(AVCodecContext *avctx,
                                const uint8_t  *data,
                                uint32_t        size)
 {
-    DiracSlice *slices = (DiracSlice *)data;
+    int err;
     DiracContext *s = avctx->priv_data;
+    DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
 
-    avctx->execute2(avctx, vulkan_dirac_decode_slice_row, slices, NULL, s->num_y);
+    if (dec->thread_buf_size != s->thread_buf_size) {
+        err = alloc_quant_buf(s, dec);
+        if (err < 0)
+            return 0;
+    }
+
+    avctx->execute2(avctx, decode_hq_slice_row, NULL, NULL, s->num_y);
 
     return 0;
 }

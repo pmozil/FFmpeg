@@ -218,9 +218,6 @@ static av_cold int dirac_decode_end(AVCodecContext *avctx)
 
     av_freep(&s->thread_buf);
     av_freep(&s->slice_params_buf);
-    if (s->hwaccel_picture_private) {
-        av_freep(s->hwaccel_picture_private);
-    }
 
     return 0;
 }
@@ -680,9 +677,9 @@ static int decode_hq_slice(const DiracContext *s, DiracSlice *slice, uint8_t *tm
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
-                                                    qfactor[level][orientation],
-                                                    qoffset[level][orientation],
-                                                    c->tot_v, c->tot_h);
+                                                   qfactor[level][orientation],
+                                                   qoffset[level][orientation],
+                                                   c->tot_v, c->tot_h);
 
                 off += c->tot << (s->pshift + 1);
             }
@@ -785,8 +782,8 @@ static int decode_lowdelay(DiracContext *s)
             return AVERROR_INVALIDDATA;
         }
 
-        if (s->avctx->hwaccel)
-            FF_HW_CALL(s->avctx, decode_slice, (uint8_t *)slices, s->num_y);
+        if (avctx->hwaccel)
+            FF_HW_CALL(avctx, decode_slice, NULL, 0);
         else
             avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
     } else {
@@ -1657,6 +1654,12 @@ static int dirac_decode_frame_internal(DiracContext *s)
     int y, i, comp, dsty;
     int ret;
 
+    if (s->avctx->hwaccel) {
+        ret = FF_HW_CALL(s->avctx, start_frame, NULL, 0);
+        if (ret < 0)
+            return ret;
+    }
+
     if (s->low_delay) {
         /* [DIRAC_STD] 13.5.1 low_delay_transform_data() */
         if (!s->hq_picture) {
@@ -1669,11 +1672,11 @@ static int dirac_decode_frame_internal(DiracContext *s)
             if ((ret = decode_lowdelay(s)) < 0)
                 return ret;
         }
+    }
 
-        if (s->hq_picture && s->avctx->hwaccel) {
-            ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
-            return ret;
-        }
+    if (s->avctx->hwaccel) {
+        ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
+        return ret;
     }
 
     for (comp = 0; comp < 3; comp++) {
@@ -1757,7 +1760,6 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
 {
     int ret, i;
     int chroma_x_shift, chroma_y_shift;
-
     ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift,
                                            &chroma_y_shift);
     if (ret < 0)
@@ -1932,7 +1934,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
     if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
         enum AVPixelFormat *pix_fmts;
-        enum AVPixelFormat pix_fmt;
         if (s->seen_sequence_header)
             return 0;
 
@@ -1953,7 +1954,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         ff_set_sar(avctx, dsh->sample_aspect_ratio);
-
+        s->sof_pix_fmt         = dsh->pix_fmt;
         avctx->pix_fmt         = dsh->pix_fmt;
         avctx->color_range     = dsh->color_range;
         avctx->color_trc       = dsh->color_trc;
@@ -1966,26 +1967,19 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         s->version.major       = dsh->version.major;
         s->version.minor       = dsh->version.minor;
         s->seq                 = *dsh;
+        av_freep(&dsh);
+
+        s->pshift = s->bit_depth > 8;
 
         pix_fmts = (enum AVPixelFormat[]){
 #if CONFIG_DIRAC_VULKAN_HWACCEL
             AV_PIX_FMT_VULKAN,
 #endif
-            dsh->pix_fmt,
+            s->sof_pix_fmt,
             AV_PIX_FMT_NONE,
         };
 
-        pix_fmt = ff_get_format(s->avctx, pix_fmts);
-        avctx->pix_fmt         = pix_fmt;
-
-        if (pix_fmt < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Could not find the pixel format!\n");
-            return AVERROR(EINVAL);
-        }
-
-        av_freep(&dsh);
-
-        s->pshift = s->bit_depth > 8;
+        avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
 
         ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
                                                &s->chroma_x_shift,
@@ -2020,14 +2014,12 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         for (i = 0; i < MAX_FRAMES; i++)
             if (s->all_frames[i].avframe->data[0] == NULL)
                 pic = &s->all_frames[i];
-
         if (!pic) {
             av_log(avctx, AV_LOG_ERROR, "framelist full\n");
             return AVERROR_INVALIDDATA;
         }
 
         av_frame_unref(pic->avframe);
-
 
         /* [DIRAC_STD] Defined in 9.6.1 ... */
         tmp            =  parse_code & 0x03;                   /* [DIRAC_STD] num_refs()      */
@@ -2051,9 +2043,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         /* VC-2 Low Delay has a different parse code than the Dirac Low Delay */
         if (s->version.minor == 2 && parse_code == 0x88)
-        {
             s->ld_picture = 1;
-        }
 
         if (s->low_delay && !(s->ld_picture || s->hq_picture) ) {
             av_log(avctx, AV_LOG_ERROR, "Invalid low delay flag\n");
@@ -2061,18 +2051,15 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         if ((ret = get_buffer_with_edge(avctx, pic->avframe, (parse_code & 0x0C) == 0x0C ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
-        {
             return ret;
-        }
         s->current_picture = pic;
 
-        if (s->avctx->hwaccel)
-        {
-            if (!(s->low_delay && s->hq_picture))
-            {
+        if (s->avctx->hwaccel) {
+            if (!(s->low_delay && s->hq_picture)) {
                 av_log(avctx, AV_LOG_ERROR, "The HWaccel only supports VC-2\n");
                 return AVERROR_INVALIDDATA;
             }
+
             if (!s->hwaccel_picture_private) {
                 const FFHWAccel *hwaccel = ffhwaccel(s->avctx->hwaccel);
                 s->hwaccel_picture_private =
@@ -2080,13 +2067,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
                 if (!s->hwaccel_picture_private)
                     return AVERROR(ENOMEM);
             }
-            ret = FF_HW_CALL(s->avctx, start_frame, NULL, 0);
-            if (ret < 0)
-            {
-                return ret;
-            }
-        } else
-        {
+        } else {
             s->plane[0].stride = pic->avframe->linesize[0];
             s->plane[1].stride = pic->avframe->linesize[1];
             s->plane[2].stride = pic->avframe->linesize[2];
@@ -2094,6 +2075,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             if (alloc_buffers(s, FFMAX3(FFABS(s->plane[0].stride), FFABS(s->plane[1].stride), FFABS(s->plane[2].stride))) < 0)
                 return AVERROR(ENOMEM);
         }
+
         /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
         ret = dirac_decode_picture_header(s);
         if (ret < 0)
@@ -2201,6 +2183,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, AVFrame *picture,
 
     return buf_idx;
 }
+
 
 const FFCodec ff_dirac_decoder = {
     .p.name         = "dirac",
