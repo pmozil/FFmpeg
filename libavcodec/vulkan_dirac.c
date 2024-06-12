@@ -41,18 +41,15 @@ typedef  struct DiracVulkanDecodeContext {
     int quant_val_buf_size;
     int thread_buf_size;
     FFVkBuffer quant_val_buf_host;
-    FFVkBuffer quant_val_buf_vk;
 
     int n_slice_bufs;
     uint8_t *slice_buf_ptr;
     int slice_buf_size;
     FFVkBuffer slice_buf_host;
-    FFVkBuffer slice_buf_vk;
 
     uint8_t *quant_buf_ptr;
     int quant_buf_size;
     FFVkBuffer quant_buf_host;
-    FFVkBuffer quant_buf_vk;
 } DiracVulkanDecodeContext;
 
 typedef  struct DiracVulkanDecodePicture {
@@ -76,8 +73,36 @@ static const char dequant[] = {
     C(1,     } else if (val > 0) {                                            )
     C(2,         val = ((val*qf + qs) >> 2);                                  )
     C(1,     }                                                                )
-    C(1,     imageStore(out_img[plane], pos, vec4(val));                      )
+    C(1,     imageStore(out_img[plane], pos, vec4(255) / 255.0);              )
+    // C(1,     imageStore(out_img[plane], pos, vec4(1.0));              )
     C(0, }                                                                    )
+};
+
+static const char proc_slice[] = {
+    C(0, void proc_slice(int slice_idx) {                                                         )
+    C(1,     const Slice s = slices[slice_idx];                                                   )
+    C(1,     const int base_idx = slice_idx << 4;                                                 )
+    C(1,     int offs = s.off;                                                                    )
+    C(1,     int i = 0;                                                                           )
+    C(1,     for(int plane = 0; plane < 3; plane++) {                                             )
+    C(2,        for(int level = 0; level < wavelet_depth; level++) {                              )
+    C(3,        const SliceCoeffs c = s.coeffs[DWT_LEVELS * plane + level];                       )
+    C(3,        int orient = level == 0 ? 0 : 1;                                                  )
+    C(3,        for(; orient < 4; orient++) {                                                     )
+    C(4,            int y = int(gl_GlobalInvocationID.y);                                         )
+    C(4,            int qf = quantMatrix[base_idx + level * DWT_LEVELS + orient];                 )
+    C(4,            int qs = quantMatrix[base_idx + (level + 4) * DWT_LEVELS + orient];           )
+    C(4,            for(; y < c.tot_v; y += int(gl_NumWorkGroups.y)) {                            )
+    C(5,               int x = int(gl_GlobalInvocationID.x);                                      )
+    C(4,               for(; x < c.tot_h; x += int(gl_NumWorkGroups.x)) {                         )
+    C(5,                   offs++;                                                                )
+    C(5,                   dequant(plane, offs, ivec2(c.left + x, c.top + y), qf, qs);            )
+    C(4,               }                                                                          )
+    C(4,               }                                                                          )
+    C(3,            }                                                                             )
+    C(2,        }                                                                                 )
+    C(1,    }                                                                                     )
+    C(0, }                                                                                        )
 };
 
 static void free_common(AVCodecContext *avctx)
@@ -106,21 +131,24 @@ static void free_common(AVCodecContext *avctx)
     //     vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
     if (dec->quant_val_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->quant_val_buf_host);
         av_free(dec->quant_val_buf_ptr);
     }
 
     if (dec->slice_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_host);
         av_free(dec->slice_buf_ptr);
     }
 
     if (dec->quant_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
         av_free(dec->quant_buf_ptr);
     }
 
     // ff_vk_uninit(s);
 }
 
-static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
+static inline int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
                                  uint8_t *mem, FFVkBuffer *buf) {
     int err;
     size_t offs;
@@ -154,7 +182,8 @@ static int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
     err = ff_vk_create_buf(s, buf, req_size,
                             &create_desc,
                             &import_desc,
-                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (err < 0)
@@ -168,6 +197,10 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     dec->n_slice_bufs = length;
 
+    if (dec->slice_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_host);
+    }
+
     dec->slice_buf_size = sizeof(DiracSliceVkBuf) * length;
     dec->slice_buf_ptr = av_realloc(dec->slice_buf_ptr, dec->slice_buf_size);
     if (!dec->slice_buf_ptr)
@@ -177,13 +210,24 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
                                 dec->slice_buf_ptr, &dec->slice_buf_host);
     if (err < 0)
         return err;
-    av_log(ctx->avctx, AV_LOG_INFO, "Slice val buf size = %i\n", dec->slice_buf_size);
+
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
+                                    NULL, 1, 1, 0,
+                                    dec->quant_buf_host.address,
+                                    dec->quant_buf_host.size,
+                                    VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
 
     return 0;
 }
 
 static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     int err, length = ctx->num_y * ctx->num_x;
+
+    if (dec->quant_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
+    }
 
     dec->n_slice_bufs = length;
 
@@ -197,7 +241,13 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     if (err < 0)
         return err;
 
-    av_log(ctx->avctx, AV_LOG_INFO, "Dequant val buf size = %i\n", dec->quant_buf_size);
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
+                                    NULL, 1, 2, 0,
+                                    dec->slice_buf_host.address,
+                                    dec->slice_buf_host.size,
+                                    VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
 
     return 0;
 }
@@ -207,6 +257,10 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     if (ctx->thread_buf_size < 0)
         return 0;
+
+    if (dec->quant_val_buf_ptr) {
+        ff_vk_free_buf(&dec->vkctx, &dec->quant_val_buf_host);
+    }
 
     dec->thread_buf_size = ctx->thread_buf_size;
 
@@ -220,8 +274,13 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     if (err < 0)
         return err;
 
-    av_log(ctx->avctx, AV_LOG_INFO, "Thread buf size = %i\n", ctx->thread_buf_size);
-    av_log(ctx->avctx, AV_LOG_INFO, "Quant val buf size = %i\n", dec->quant_val_buf_size);
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
+                                    NULL, 1, 0, 0,
+                                    dec->quant_val_buf_host.address,
+                                    dec->quant_val_buf_host.size,
+                                    VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
 
     return 0;
 }
@@ -238,6 +297,40 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     FFVkSPIRVShader *shd = &s->quant_shd;
     FFVulkanPipeline *pl = &s->quant_pl;
     FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+    ff_vk_shader_set_compute_sizes(shd, 16, 16, 4);
+
+    shd = &s->quant_shd;
+
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "out_img",
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
+          .mem_quali = "writeonly",
+          .dimensions = 2,
+          .elems = planes,
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 1, 0, 0));
+
+    GLSLC(0, struct SliceCoeffs { );
+    GLSLC(1,     int left;        );
+    GLSLC(1,     int top;         );
+    GLSLC(1,     int tot_h;       );
+    GLSLC(1,     int tot_v;       );
+    GLSLC(1,     int tot;         );
+    GLSLC(0, };                   );
+
+    GLSLC(0, struct Slice {                                  );
+    GLSLC(1,     int idx;                                    );
+    GLSLC(1,     int off;                                    );
+    GLSLF(1,     SliceCoeffs coeffs[%i];, MAX_DWT_LEVELS * 3 );
+    GLSLC(0, };                                              );
 
     desc = (FFVulkanDescriptorSetBinding[])
     {
@@ -263,78 +356,34 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .mem_quali = "readonly",
         },
     };
-    RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
-    ff_vk_shader_set_compute_sizes(shd, 16, 16, 16);
-
-    GLSLC(0, struct SliceCoeffs { );
-    GLSLC(1,     int left;        );
-    GLSLC(1,     int top;         );
-    GLSLC(1,     int tot_h;       );
-    GLSLC(1,     int tot_v;       );
-    GLSLC(1,     int tot;         );
-    GLSLC(0, };                   );
-
-    GLSLC(0, struct Slice {                                 );
-    GLSLC(1,     int idx;                                   );
-    GLSLC(1,     int off;                                   );
-    GLSLF(1,     SliceCoeffs coeffs[%i];, MAX_DWT_LEVELS* 3 );
-    GLSLC(0, };                                             );
-
-    GLSLC(0, layout(push_constant, std430) uniform pushConstants { );
-    GLSLC(1,     int off;                                          );
-    GLSLC(1,     int plane;                                        );
-    GLSLC(1,     int wavelet_depth;                                );
-    GLSLC(0, };                                                    );
-    GLSLC(0,                                                       );
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 3, 1, 0));
 
     ff_vk_add_push_constant(pl, 0, sizeof(SliceCoeffsPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
 
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 3, 1, 0));
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(1,     int slices_num;                                    );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
 
-    desc = (FFVulkanDescriptorSetBinding[])
-    {
-        {
-            .name       = "out_img",
-            .type       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .stages     = VK_SHADER_STAGE_COMPUTE_BIT,
-            .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
-            .dimensions = 2,
-            .elems      = planes,
-            .mem_quali = "writeonly",
-        },
-    };
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 1, 0, 0));
+    GLSLF(0, #define DWT_LEVELS %i, MAX_DWT_LEVELS                  );
 
     GLSLD(dequant);
-    GLSLC(0, void main()                                                                );
-    GLSLC(0, {                                                                          );
-    GLSLC(1,     int i = 0;                                                             );
-    GLSLC(1,     int y = int(gl_GlobalInvocationID.y);                                  );
-    GLSLC(1,     const Slice s = slices[0];                                             );
-    GLSLC(1,     int offs = s.off;                                                      );
-    GLSLC(1,     for(int level = 0; level < wavelet_depth; level++) {                   );
-    GLSLC(2,        const SliceCoeffs c = s.coeffs[level];                              );
-    GLSLC(2,        int orient = level == 0 ? 0 : 1;                                    );
-    GLSLC(2,        for(; orient < 4; orient++) {                                       );
-    GLSLC(3,            for(; y < c.tot_v; y += int(gl_NumWorkGroups.y)) {              );
-    GLSLC(4,               int x = int(gl_GlobalInvocationID.x);                        );
-    GLSLC(4,               for(; x < c.tot_h; x += int(gl_NumWorkGroups.x)) {           );
-    GLSLC(5,                   i++;                                                     );
-    GLSLF(5,                   int qf = quantMatrix[%i * level + orient];,
-                                MAX_DWT_LEVELS);
-    GLSLF(5,                   int qs = quantMatrix[%i * (level + 4) + orient];,
-                                MAX_DWT_LEVELS);
-    GLSLC(5,                   dequant(0, offs + i, ivec2(c.top + y, c.left + x), qf, qs); );
-    GLSLC(4,               }                                                            );
-    GLSLC(3,            }                                                               );
-    GLSLC(2,        }                                                                   );
-    GLSLC(2,        offs += c.tot;                                                      );
-    GLSLC(1,    }                                                                       );
-    GLSLC(0, }                                                                          );
+    GLSLD(proc_slice);
+    GLSLC(0, void main()                                                        );
+    GLSLC(0, {                                                                  );
+    GLSLC(1,    int idx = int(gl_GlobalInvocationID.z);                         );
+    GLSLC(1,    for (; idx < 10; idx += int(gl_NumWorkGroups.z)) {              );
+    GLSLC(2,        proc_slice(idx);                                            );
+    GLSLC(1,    }                                                               );
+    GLSLC(0, }                                                                  );
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
     RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
     RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
     RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+    av_log(&s->vkctx, AV_LOG_INFO, "N desc sets: %i\n", pl->nb_descriptor_sets);
+    av_log(&s->vkctx, AV_LOG_INFO, "Bindings: %i\n", pl->desc_set[0].nb_bindings);
 
 fail:
     if (spv_opaque)
@@ -356,7 +405,7 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx) {
 
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
-    int err = 0, qf, nb_q = 0;
+    int err = 0;
     // VkResult ret;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s;
@@ -396,14 +445,9 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
         goto fail;
 
     /* Create queue context */
-    qf = ff_vk_qf_init(s, &dec->qf, VK_QUEUE_COMPUTE_BIT);
+    ff_vk_qf_init(s, &dec->qf, VK_QUEUE_COMPUTE_BIT);
 
-    if (s->query_props[qf].queryResultStatusSupport)
-        nb_q = 1;
-
-    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, MAX_AUTO_THREADS,
-                                nb_q, 0, 0,
-                                NULL);
+    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 4, 0, 0, 0, NULL);
 
     /* Get sampler */
     // av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
@@ -552,11 +596,62 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
 }
 
 static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
-    // DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
-    // DiracContext *ctx = avctx->priv_data;
-    // DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
+    int err;
+    DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+    DiracContext *ctx = avctx->priv_data;
+    DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
+    VkImageView views[AV_NUM_DATA_POINTERS];
+    VkImageMemoryBarrier2 img_bar[37];
+    int nb_img_bar = 0;
+    // VkImageMemoryBarrier2 buf_bar[37];
+    // int nb_buf_bar = 0;
 
-    return 0;
+    FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
+    ff_vk_exec_start(&dec->vkctx, exec);
+
+    ff_vk_update_push_exec(&dec->vkctx, exec, &dec->quant_pl,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(SliceCoeffsPushConst), &(SliceCoeffsPushConst) {
+                            .wavelet_depth = ctx->wavelet_depth,
+                            .slices_num = ctx->num_x * ctx->num_y,
+                           });
+
+    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    if (err < 0)
+        goto fail;
+    err = ff_vk_create_imageviews(&dec->vkctx, exec, views, pic->frame->avframe);
+    if (err < 0)
+        goto fail;
+    ff_vk_update_descriptor_img_array(&dec->vkctx, &dec->quant_pl,
+                                      exec, pic->frame->avframe, views, 0, 0,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      dec->sampler);
+
+    ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
+                        img_bar, &nb_img_bar,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        VK_QUEUE_FAMILY_IGNORED);
+
+    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
+
+    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pImageMemoryBarriers = img_bar,
+            .imageMemoryBarrierCount = nb_img_bar,
+        });
+
+    vk->CmdDispatch(exec->buf, 25, 25, ctx->num_y * ctx->num_x);
+
+    return ff_vk_exec_submit(&dec->vkctx, exec);
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
 }
 
 static int vulkan_dirac_update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
@@ -604,7 +699,8 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr)
     uint8_t *tmp_buf = &quant_val_base[s->thread_buf_size * 3 * jobnr];
     DiracSlice *slice = &s->slice_params_buf[jobnr];
     GetBitContext *gb = &slice->gb;
-    SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
+    DiracSliceVkBuf *slice_vk = ((DiracSliceVkBuf *)dec->slice_buf_ptr) + jobnr;
+    SliceCoeffs *coeffs_num = slice_vk->slices;
 
     skip_bits_long(gb, 8*s->highquality.prefix_bytes);
     quant_idx = get_bits(gb, 8);
@@ -625,7 +721,7 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr)
 
     /* Luma + 2 Chroma planes */
     for (i = 0; i < 3; i++) {
-        int coef_num, coef_par, off = 0;
+        int coef_num, coef_par;
         int64_t length = s->highquality.size_scaler*get_bits(gb, 8);
         int64_t bits_end = get_bits_count(gb) + 8*length;
         const uint8_t *addr = align_get_bits(gb);
@@ -647,6 +743,9 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr)
         }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
+
+        coeffs_num += MAX_DWT_LEVELS;
+        tmp_buf += length;
     }
 
     return 0;
@@ -673,7 +772,7 @@ static int vulkan_dirac_decode_slice(AVCodecContext *avctx,
     DiracContext *s = avctx->priv_data;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
 
-    if (dec->thread_buf_size != s->thread_buf_size) {
+    if (dec->thread_buf_size < s->thread_buf_size) {
         err = alloc_quant_buf(s, dec);
         if (err < 0)
             return 0;

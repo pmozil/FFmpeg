@@ -266,6 +266,7 @@ typedef struct SliceCoeffs {
 
 typedef struct SliceCoeffsPushConst {
     int wavelet_depth;
+    int slices_num;
 } SliceCoeffsPushConst;
 
 typedef struct DiracSliceVkBuf {
