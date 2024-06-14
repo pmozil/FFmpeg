@@ -79,29 +79,29 @@ static const char dequant[] = {
 };
 
 static const char proc_slice[] = {
-    C(0, void proc_slice(int slice_idx) {                                               )
-    C(1,    const int plane = int(gl_GlobalInvocationID.x) % 3;                         )
-    C(1,    const int off_x = int(gl_NumWorkGroups.x) / 3;                              )
-    C(1,    const Slice s = slices[slice_idx];                                          )
-    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                            )
-    C(1,    for(int level = 0; level < wavelet_depth; level++) {                        )
-    C(2,        const SliceCoeffs c = s.coeffs[DWT_LEVELS * plane + level];             )
-    C(2,        int offs = s.offs[DWT_LEVELS * plane + level];                          )
-    C(3,        int orient = int(bool(level));                                          )
-    C(2,        for(; orient < 4; orient++) {                                           )
-    C(3,            int y = int(gl_GlobalInvocationID.y);                               )
-    C(3,            int qf = quantMatrix[base_idx + level * 8 + orient];                )
-    C(3,            int qs = quantMatrix[base_idx + level * 8 + 4 + orient];            )
-    C(3,            for(; y < c.tot_v; y += int(gl_NumWorkGroups.y)) {                  )
-    C(4,                int x = int(gl_GlobalInvocationID.x) / 3;                       )
-    C(4,                for(; x < c.tot_h; x += off_x) {                                )
-    C(5,                    offs++;                                                     )
-    C(5,                    dequant(plane, offs, ivec2(c.left + x, c.top + y), qf, qs); )
-    C(4,                }                                                               )
-    C(3,            }                                                                   )
-    C(2,        }                                                                       )
-    C(1,    }                                                                           )
-    C(0, }                                                                              )
+    C(0, void proc_slice(int slice_idx) {                                           )
+    C(1,    const int plane = int(gl_GlobalInvocationID.x) % 3;                     )
+    C(1,    const int off_x = int(gl_NumWorkGroups.x) / 3;                          )
+    C(1,    const int level = int(gl_GlobalInvocationID.y) % wavelet_depth;         )
+    C(1,    const int off_y = int(gl_NumWorkGroups.y) / wavelet_depth;              )
+    C(1,    const Slice s = slices[slice_idx];                                      )
+    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                        )
+    C(2,    const SliceCoeffs c = s.coeffs[DWT_LEVELS * plane + level];             )
+    C(2,    int offs = s.offs[DWT_LEVELS * plane + level];                          )
+    C(3,    int orient = int(bool(level));                                          )
+    C(2,    for(; orient < 4; orient++) {                                           )
+    C(3,        int y = int(gl_GlobalInvocationID.y);                               )
+    C(3,        int qf = quantMatrix[base_idx + level * 8 + orient];                )
+    C(3,        int qs = quantMatrix[base_idx + level * 8 + 4 + orient];            )
+    C(3,        for(; y < c.tot_v; y += int(gl_NumWorkGroups.y)) {                  )
+    C(4,            int x = int(gl_GlobalInvocationID.x) / 3;                       )
+    C(4,            for(; x < c.tot_h; x += off_x) {                                )
+    C(5,                offs += off_x;                                              )
+    C(5,                dequant(plane, offs, ivec2(c.left + x, c.top + y), qf, qs); )
+    C(3,            }                                                               )
+    C(2,        }                                                                   )
+    C(1,    }                                                                       )
+    C(0, }                                                                          )
 };
 
 static void free_common(AVCodecContext *avctx)
@@ -211,9 +211,9 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
         return err;
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 1, 0,
-                                    dec->quant_buf_host.address,
-                                    dec->quant_buf_host.size,
+                                    NULL, 1, 2, 0,
+                                    dec->slice_buf_host.address,
+                                    dec->slice_buf_host.size,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
@@ -240,10 +240,11 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     if (err < 0)
         return err;
 
+
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 2, 0,
-                                    dec->slice_buf_host.address,
-                                    dec->slice_buf_host.size,
+                                    NULL, 1, 1, 0,
+                                    dec->quant_buf_host.address,
+                                    dec->quant_buf_host.size,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
@@ -315,6 +316,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     FFVkExecPool *exec = &s->exec_pool;
 
     RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+    ff_vk_shader_set_compute_sizes(shd, 30, 32, 1);
 
     shd = &s->quant_shd;
 
@@ -343,7 +345,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
 
     GLSLC(0, struct Slice {                                  );
     GLSLC(1,     int idx;                                    );
-    GLSLF(1,     int offs[%i];, MAX_DWT_LEVELS * 3           );
+    GLSLF(1,     int offs[%i + 1];, MAX_DWT_LEVELS * 3           );
     GLSLF(1,     SliceCoeffs coeffs[%i];, MAX_DWT_LEVELS * 3 );
     GLSLC(0, };                                              );
 
@@ -459,7 +461,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     /* Create queue context */
     ff_vk_qf_init(s, &dec->qf, VK_QUEUE_COMPUTE_BIT);
 
-    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 4, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 1, 0, 0, 0, NULL);
 
     /* Get sampler */
     // av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
@@ -622,12 +624,12 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
                             .wavelet_depth = ctx->wavelet_depth,
                             .slices_num = ctx->num_x * ctx->num_y,
                            });
-
-    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
-                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-    if (err < 0)
-        goto fail;
+    //
+    // err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
+    //                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    //                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    // if (err < 0)
+    //     goto fail;
     err = ff_vk_create_imageviews(&dec->vkctx, exec, views, pic->frame->avframe);
     if (err < 0)
         goto fail;
@@ -635,24 +637,24 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
                                       exec, pic->frame->avframe, views, 0, 0,
                                       VK_IMAGE_LAYOUT_GENERAL,
                                       dec->sampler);
-
-    ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
-                        img_bar, &nb_img_bar,
-                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_IMAGE_LAYOUT_GENERAL,
-                        VK_QUEUE_FAMILY_IGNORED);
-
-    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pImageMemoryBarriers = img_bar,
-            .imageMemoryBarrierCount = nb_img_bar,
-        });
+    //
+    // ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
+    //                     img_bar, &nb_img_bar,
+    //                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    //                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    //                     VK_ACCESS_SHADER_WRITE_BIT,
+    //                     VK_IMAGE_LAYOUT_GENERAL,
+    //                     VK_QUEUE_FAMILY_IGNORED);
+    //
+    // vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+    //         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+    //         .pImageMemoryBarriers = img_bar,
+    //         .imageMemoryBarrierCount = nb_img_bar,
+    //     });
 
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
 
-    vk->CmdDispatch(exec->buf, 6, 2, ctx->num_x * ctx->num_y);
+    vk->CmdDispatch(exec->buf, 30, 32, ctx->num_x);
 
     return ff_vk_exec_submit(&dec->vkctx, exec);
 fail:

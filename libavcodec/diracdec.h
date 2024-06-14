@@ -271,7 +271,7 @@ typedef struct SliceCoeffsPushConst {
 
 typedef struct DiracSliceVkBuf {
     int idx;
-    int offs[3 * MAX_DWT_LEVELS];
+    int offs[3 * MAX_DWT_LEVELS + 1];
     SliceCoeffs slices[3 * MAX_DWT_LEVELS];
 } DiracSliceVkBuf;
 
