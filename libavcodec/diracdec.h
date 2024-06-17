@@ -257,22 +257,21 @@ enum dirac_subband {
 };
 
 typedef struct SliceCoeffs {
-    int left;
-    int top;
-    int tot_h;
-    int tot_v;
-    int tot;
+    int32_t left;
+    int32_t top;
+    int32_t tot_h;
+    int32_t tot_v;
+    int32_t tot;
 } SliceCoeffs;
 
 typedef struct SliceCoeffsPushConst {
-    int wavelet_depth;
-    int slices_num;
+    int32_t wavelet_depth;
+    int32_t slices_num;
 } SliceCoeffsPushConst;
 
 typedef struct DiracSliceVkBuf {
-    int idx;
-    int offs[3 * MAX_DWT_LEVELS + 1];
-    SliceCoeffs slices[3 * MAX_DWT_LEVELS];
+    int32_t offs[16];
+    SliceCoeffs slices[16];
 } DiracSliceVkBuf;
 
 #endif
