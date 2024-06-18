@@ -276,6 +276,7 @@ typedef struct SliceCoeffVk {
     int32_t tot_v;
     int32_t tot;
     int32_t offs;
+    int32_t pad[2];
 } SliceCoeffVk;
 
 #endif

@@ -69,7 +69,7 @@ static const char dequant[] = {
     C(0, void dequant(int plane, int idx, ivec2 pos, float qf, float qs) {    )
     C(1,     float val = float(inBuffer[idx]);                                )
     C(1,     val = sign(val) * (abs(val) * qf + qs) / 255.0;                  )
-    C(1,     imageStore(out_img[plane], pos, vec4(1.0));                      )
+    C(1,     imageStore(out_img[plane], pos, vec4(val));                      )
     C(0, }                                                                    )
 };
 
@@ -78,19 +78,18 @@ static const char proc_slice[] = {
     C(1,    const int plane = int(gl_GlobalInvocationID.x) / 4;                   )
     C(1,    const int orient = int(gl_GlobalInvocationID.x) % 4;                  )
     C(1,    const int level = int(gl_GlobalInvocationID.y);                       )
+    C(1,    if ((level > 0 && orient == 0)) return;                               )
     C(1,                                                                          )
-    C(1,    const int base_slice_idx = slice_idx * DWT_LEVELS * 3;                )
-    C(1,    const Slice s = slices[base_slice_idx + DWT_LEVELS * plane + level];  )
-    C(1,    const Slice s1 = slices[base_slice_idx + DWT_LEVELS * plane + level]; )
+    C(1,    const int act_slice_idx = slice_idx * DWT_LEVELS * 3                  )
+    C(1,                                    + DWT_LEVELS * plane + level;         )
+    C(1,    const Slice s = slices[act_slice_idx];                                )
     C(1,    int offs = s.offs + s.tot * orient;                                   )
-    C(1,    bool exit = (s1.offs - offs) < s.tot_v * s.tot_h;                     )
-    // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\\n", slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
-    C(1,                                                                          )
-    C(1,    if (exit || (level > 0 && orient == 0)) return;                       )
     C(1,                                                                          )
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                      )
     C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);         )
     C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);     )
+    // C(1,    if (s.tot_h * s.tot_v <= 1024) return;                                )
+    // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\\n", act_slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
     C(1,    for(int y = 0; y < s.tot_v; y++) {                                          )
     C(2,        for(int x = 0; x < s.tot_h; x++) {                                     )
     C(3,            dequant(plane, offs, ivec2(s.left + x, s.top + y), qf, qs);   )
@@ -194,10 +193,11 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     if (dec->slice_buf_ptr) {
         ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_host);
+        av_free(dec->slice_buf_ptr);
     }
 
     dec->slice_buf_size = sizeof(SliceCoeffVk) * length * 3 * MAX_DWT_LEVELS;
-    dec->slice_buf_ptr = av_realloc(dec->slice_buf_ptr, dec->slice_buf_size);
+    dec->slice_buf_ptr = av_mallocz(dec->slice_buf_size);
     if (!dec->slice_buf_ptr)
         return AVERROR(ENOMEM);
 
@@ -222,12 +222,13 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     if (dec->quant_buf_ptr) {
         ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
+        av_free(dec->quant_buf_ptr);
     }
 
     dec->n_slice_bufs = length;
 
     dec->quant_buf_size = sizeof(int32_t) * MAX_DWT_LEVELS * 8 * length;
-    dec->quant_buf_ptr = av_realloc(dec->quant_buf_ptr, dec->quant_buf_size);
+    dec->quant_buf_ptr = av_mallocz(dec->quant_buf_size);
     if (!dec->quant_buf_ptr)
         return AVERROR(ENOMEM);
 
@@ -274,12 +275,13 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     if (dec->quant_val_buf_ptr) {
         ff_vk_free_buf(&dec->vkctx, &dec->quant_val_buf_host);
+        av_free(dec->quant_val_buf_ptr);
     }
 
     dec->thread_buf_size = coef_buf_size;
 
     dec->quant_val_buf_size = dec->thread_buf_size * 3 * length;
-    dec->quant_val_buf_ptr = av_realloc(dec->quant_val_buf_ptr, dec->quant_val_buf_size);
+    dec->quant_val_buf_ptr = av_mallocz(dec->quant_val_buf_size);
     if (!dec->quant_val_buf_ptr)
         return AVERROR(ENOMEM);
 
@@ -340,6 +342,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(1,     int tot_v;       );
     GLSLC(1,     int tot;         );
     GLSLC(1,     int offs;        );
+    GLSLC(1,     int pad[2];      );
     GLSLC(0, };                   );
 
     desc = (FFVulkanDescriptorSetBinding[])
@@ -683,8 +686,7 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr)
     uint8_t *tmp_buf = &quant_val_base[s->thread_buf_size * 3 * jobnr];
     DiracSlice *slice = &s->slice_params_buf[jobnr];
     GetBitContext *gb = &slice->gb;
-    SliceCoeffVk *slice_vk = ((SliceCoeffVk *)dec->slice_buf_ptr);
-    slice_vk = &slice_vk[jobnr * 3 * MAX_DWT_LEVELS];
+    SliceCoeffVk *slice_vk = ((SliceCoeffVk *)dec->slice_buf_ptr) + jobnr * 3 * MAX_DWT_LEVELS;
 
     skip_bits_long(gb, 8*s->highquality.prefix_bytes);
     quant_idx = get_bits(gb, 8);
