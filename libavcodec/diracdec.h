@@ -257,21 +257,25 @@ enum dirac_subband {
 };
 
 typedef struct SliceCoeffs {
+    int left;
+    int top;
+    int tot_h;
+    int tot_v;
+    int tot;
+} SliceCoeffs;
+
+typedef struct QuantPushConst {
+    int32_t wavelet_depth;
+    int32_t slices_num;
+} QuantPushConst;
+
+typedef struct SliceCoeffVk {
     int32_t left;
     int32_t top;
     int32_t tot_h;
     int32_t tot_v;
     int32_t tot;
-} SliceCoeffs;
-
-typedef struct SliceCoeffsPushConst {
-    int32_t wavelet_depth;
-    int32_t slices_num;
-} SliceCoeffsPushConst;
-
-typedef struct DiracSliceVkBuf {
-    int32_t offs[16];
-    SliceCoeffs slices[16];
-} DiracSliceVkBuf;
+    int32_t offs;
+} SliceCoeffVk;
 
 #endif
