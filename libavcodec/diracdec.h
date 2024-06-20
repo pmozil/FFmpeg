@@ -265,18 +265,17 @@ typedef struct SliceCoeffs {
 } SliceCoeffs;
 
 typedef struct QuantPushConst {
-    int32_t wavelet_depth;
-    int32_t slices_num;
+    int wavelet_depth;
+    int slices_num;
 } QuantPushConst;
 
 typedef struct SliceCoeffVk {
-    int32_t left;
-    int32_t top;
-    int32_t tot_h;
-    int32_t tot_v;
-    int32_t tot;
-    int32_t offs;
-    int32_t pad[2];
+    int left;
+    int top;
+    int tot_h;
+    int tot_v;
+    int tot;
+    int offs;
 } SliceCoeffVk;
 
 #endif
