@@ -278,4 +278,11 @@ typedef struct SliceCoeffVk {
     int offs;
 } SliceCoeffVk;
 
+typedef struct SubbandOffset {
+    int left;
+    int top;
+    int width;
+    int height;
+} SubbandOffset;
+
 #endif

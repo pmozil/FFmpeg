@@ -50,6 +50,9 @@ typedef  struct DiracVulkanDecodeContext {
     int32_t *quant_buf_ptr;
     int quant_buf_size;
     FFVkBuffer quant_buf_host;
+
+    FFVkBuffer subband_info;
+    SubbandOffset *subband_info_ptr;
 } DiracVulkanDecodeContext;
 
 typedef  struct DiracVulkanDecodePicture {
@@ -138,6 +141,8 @@ static void free_common(AVCodecContext *avctx)
         ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
         av_free(dec->quant_buf_ptr);
     }
+
+    ff_vk_free_buf(&dec->vkctx, &dec->subband_info);
 
     // ff_vk_uninit(s);
 }
@@ -396,7 +401,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     // VkResult ret;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s;
-    // FFVulkanFunctions *vk;
     FFVkSPIRVCompiler *spv;
     //
     // VkSamplerYcbcrConversionCreateInfo yuv_sampler_info = {
@@ -462,6 +466,19 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     dec->quant_buf_ptr = NULL;
     dec->thread_buf_size = 0;
     dec->n_slice_bufs = 0;
+
+    err = ff_vk_create_buf(&dec->vkctx, &dec->subband_info,
+                         sizeof(SubbandOffset) * MAX_DWT_LEVELS * 12, NULL, NULL,
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (err < 0)
+        return err;
+    err = ff_vk_map_buffer(&dec->vkctx, &dec->subband_info,
+                           (uint8_t **)&dec->subband_info_ptr, 0);
+    if (err < 0)
+        return err;
 
     return 0;
 
@@ -541,6 +558,28 @@ static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pi
     vkpic->wait_semaphores = vk->WaitSemaphores;
 
     return 0;
+}
+
+static int setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    SubbandOffset *offs = dec->subband_info_ptr;
+    for (int plane = 0; plane < 3; plane++) {
+        for (int level = 0; level < ctx->wavelet_depth; level++) {
+            const int shift = ctx->wavelet_depth - length - 1;
+            for (int orient = 0; orient < 4; orient++) {
+                const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
+                SubbandOffset *off = &offs[idx];
+
+                off->width = ctx->plane[plane].width >> shift;
+                off->height = ctx->plane[plane].height >> shift;
+                if (level == 0) {
+                    off->left = 0;
+                    off->top = 0;
+                } else {
+
+                }
+            }
+        }
+    }
 }
 
 static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
