@@ -95,13 +95,14 @@ static const char proc_slice[] = {
     C(1,                                    + 4 * + level + orient;                 )
     C(1,    const Slice s = slices[act_slice_idx];                                  )
     C(1,    const SubbandOffset sub_off = subband_offs[subband_idx];                )
-    C(1,    int offs = s.offs + s.tot * orient;                                     )
+    C(1,    int offs = s.offs + s.tot * level;                                      )
+    C(1,    if (slice_idx < 5)                                                      )
+    // C(1,    debugPrintfEXT("slice =  %i, plane = %i, level = %i, tot = %i\n",
+    //                        slice_idx, plane, level, s.tot);                         )
     C(1,                                                                            )
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                        )
     C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);           )
     C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);       )
-    // C(1,    if (s.tot_h >= 0 && s.tot_h < 20 && s.tot_v <= 20 && s.tot_h >= 0) return;  )
-    // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\n", act_slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
     C(1,    for(int y = 0; y < s.tot_v; y++) {                                      )
     C(2,        for(int x = 0; x < s.tot_h; x++) {                                  )
     C(3,            const int img_x = sub_off.left + s.left + x;                    )
@@ -578,12 +579,12 @@ static void setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
                 off->height = h;
                 off->left = 0;
                 off->top = 0;
-                //
-                // for (int lev = level; lev >= 0; lev--) {
-                //     SubBand *b = &p->band[lev][orient];
-                //     off->top += b->height;
-                //     off->left += b->width;
-                // }
+
+                for (int lev = level; lev >= 0; lev--) {
+                    SubBand *b = &p->band[lev][orient];
+                    off->top += b->height;
+                    off->left += b->width;
+                }
 
                 if (orient & 1)
                     off->left += off->width;
