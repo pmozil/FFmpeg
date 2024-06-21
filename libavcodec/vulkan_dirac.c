@@ -37,19 +37,28 @@ typedef  struct DiracVulkanDecodeContext {
     FFVkQueueFamilyCtx qf;
     FFVkExecPool exec_pool;
 
-    int *quant_val_buf_ptr;
     int quant_val_buf_size;
     int thread_buf_size;
-    FFVkBuffer quant_val_buf_host;
+    int *quant_val_buf_ptr;
+    int *quant_val_buf_vk_ptr;
+    FFVkBuffer *quant_val_buf;
+    AVBufferRef *av_quant_val_buf;
+    size_t quant_val_buf_offs;
 
     int n_slice_bufs;
-    SliceCoeffVk *slice_buf_ptr;
     int slice_buf_size;
-    FFVkBuffer slice_buf_host;
+    SliceCoeffVk *slice_buf_ptr;
+    SliceCoeffVk *slice_buf_vk_ptr;
+    FFVkBuffer *quant_buf;
+    AVBufferRef *av_quant_buf;
+    size_t quant_buf_offs;
 
     int32_t *quant_buf_ptr;
+    int32_t *quant_buf_vk_ptr;
     int quant_buf_size;
-    FFVkBuffer quant_buf_host;
+    FFVkBuffer *slice_buf;
+    AVBufferRef *av_slice_buf;
+    size_t slice_buf_offs;
 
     FFVkBuffer subband_info;
     SubbandOffset *subband_info_ptr;
@@ -91,8 +100,8 @@ static const char proc_slice[] = {
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                      )
     C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);         )
     C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);     )
-    C(1,    if (s.tot_h * s.tot_v >= 1024) return;                                )
-    // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\\n", act_slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
+    // C(1,    if (s.tot_h >= 0 && s.tot_h < 20 && s.tot_v <= 20 && s.tot_h >= 0) return;  )
+    // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\n", act_slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
     C(1,    for(int y = 0; y < s.tot_v; y++) {                                          )
     C(2,        for(int x = 0; x < s.tot_h; x++) {                                     )
     C(3,            dequant(plane, offs, ivec2(s.left + x, s.top + y), qf, qs);   )
@@ -128,18 +137,18 @@ static void free_common(AVCodecContext *avctx)
     //     vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
     if (dec->quant_val_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->quant_val_buf_host);
+        av_buffer_unref(&dec->av_quant_val_buf);
         av_free(dec->quant_val_buf_ptr);
     }
 
-    if (dec->slice_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_host);
-        av_free(dec->slice_buf_ptr);
+    if (dec->quant_buf_ptr) {
+        av_buffer_unref(&dec->av_quant_buf);
+        av_free(dec->quant_buf_ptr);
     }
 
-    if (dec->quant_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
-        av_free(dec->quant_buf_ptr);
+    if (dec->slice_buf_ptr) {
+        av_buffer_unref(&dec->av_slice_buf);
+        av_free(dec->slice_buf_ptr);
     }
 
     ff_vk_free_buf(&dec->vkctx, &dec->subband_info);
@@ -148,43 +157,56 @@ static void free_common(AVCodecContext *avctx)
 }
 
 static inline int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec, size_t req_size,
-                                 uint8_t *mem, FFVkBuffer *buf) {
+                                 void **mem, AVBufferRef **avbuf, FFVkBuffer **buf) {
+    // FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+    // VkResult ret;
     int err;
-    size_t offs;
+    //
+    // VkExternalMemoryBufferCreateInfo create_desc = {
+    //     .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+    //     .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+    // };
+    //
+    // VkImportMemoryHostPointerInfoEXT import_desc = {
+    //     .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+    //     .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+    // };
+    //
+    // VkMemoryHostPointerPropertiesEXT p_props = {
+    //     .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+    // };
+    //
+    // size_t offs;
+    // offs = (uintptr_t)mem % dec->vkctx.hprops.minImportedHostPointerAlignment;
+    // import_desc.pHostPointer = (uint8_t *)mem - offs;
+    //
+    // req_size = FFALIGN(offs + req_size,
+    //                     dec->vkctx.hprops.minImportedHostPointerAlignment);
+    //
+    // ret = vk->GetMemoryHostPointerPropertiesEXT(dec->vkctx.hwctx->act_dev,
+    //                                             import_desc.handleType,
+    //                                             import_desc.pHostPointer,
+    //                                             &p_props);
+    //
+    // if (ret != VK_SUCCESS || !p_props.memoryTypeBits) {
+    //     return AVERROR(ENOSYS);
+    // }
 
-    FFVulkanContext *s = &dec->vkctx;
-    FFVulkanFunctions *vk = &s->vkfn;
-    VkExternalMemoryBufferCreateInfo create_desc = {
-        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-    };
-
-    VkImportMemoryHostPointerInfoEXT import_desc = {
-        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-    };
-
-    VkMemoryHostPointerPropertiesEXT p_props = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
-    };
-
-    offs = (uintptr_t)mem % s->hprops.minImportedHostPointerAlignment;
-    import_desc.pHostPointer = mem - offs;
-    req_size = FFALIGN(offs + req_size,
-                s->hprops.minImportedHostPointerAlignment);
-
-    err = vk->GetMemoryHostPointerPropertiesEXT(s->hwctx->act_dev,
-                                                import_desc.handleType,
-                                                import_desc.pHostPointer,
-                                                &p_props);
-
-    err = ff_vk_create_buf(s, buf, req_size,
-                            &create_desc,
-                            &import_desc,
+    err = ff_vk_create_avbuf(&dec->vkctx, avbuf, req_size,
+                             NULL,
+                             NULL,
+                            // &create_desc,
+                            // &import_desc,
                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (err < 0)
+        return err;
+
+    *buf = (FFVkBuffer*)(*avbuf)->data;
+    err = ff_vk_map_buffer(&dec->vkctx, *buf,
+                           (uint8_t **)mem, 0);
     if (err < 0)
         return err;
 
@@ -197,7 +219,7 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     dec->n_slice_bufs = length;
 
     if (dec->slice_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->slice_buf_host);
+        av_buffer_unref(&dec->av_slice_buf);
         av_free(dec->slice_buf_ptr);
     }
 
@@ -207,7 +229,9 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
         return AVERROR(ENOMEM);
 
     err = alloc_host_mapped_buf(dec, dec->slice_buf_size,
-                                (uint8_t *)dec->slice_buf_ptr, &dec->slice_buf_host);
+                                (void **)&dec->slice_buf_vk_ptr,
+                                &dec->av_slice_buf,
+                                &dec->slice_buf);
     if (err < 0)
         return err;
 
@@ -218,7 +242,7 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     int err, length = ctx->num_y * ctx->num_x;
 
     if (dec->quant_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->quant_buf_host);
+        av_buffer_unref(&dec->av_quant_buf);
         av_free(dec->quant_buf_ptr);
     }
 
@@ -230,7 +254,9 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
         return AVERROR(ENOMEM);
 
     err = alloc_host_mapped_buf(dec, dec->quant_buf_size,
-                                (uint8_t *)dec->quant_buf_ptr, &dec->quant_buf_host);
+                                (void **)&dec->quant_buf_vk_ptr,
+                                &dec->av_quant_buf,
+                                &dec->quant_buf);
     if (err < 0)
         return err;
 
@@ -262,7 +288,7 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     coef_buf_size = (coef_buf_size << 2) + 512;
 
     if (dec->quant_val_buf_ptr) {
-        ff_vk_free_buf(&dec->vkctx, &dec->quant_val_buf_host);
+        av_buffer_unref(&dec->av_quant_val_buf);
         av_free(dec->quant_val_buf_ptr);
     }
 
@@ -274,7 +300,9 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
         return AVERROR(ENOMEM);
 
     err = alloc_host_mapped_buf(dec, dec->quant_val_buf_size,
-                                (uint8_t *)dec->quant_val_buf_ptr, &dec->quant_val_buf_host);
+                                (void **)&dec->quant_val_buf_vk_ptr,
+                                &dec->av_quant_val_buf,
+                                &dec->quant_val_buf);
     if (err < 0)
         return err;
 
@@ -295,10 +323,8 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     FFVkExecPool *exec = &s->exec_pool;
 
     RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
-    // ff_vk_shader_set_compute_sizes(shd, 16, 24, 1);
 
     shd = &s->quant_shd;
-
 
     desc = (FFVulkanDescriptorSetBinding[])
     {
@@ -332,7 +358,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .buf_content = "int inBuffer[];",
             .mem_quali = "readonly",
-            // .mem_layout = "std430",
+            .mem_layout = "std430",
         },
         {
             .name = "quant_vals_buf",
@@ -340,7 +366,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .buf_content = "int quantMatrix[];",
             .mem_quali = "readonly",
-            // .mem_layout = "std430",
+            .mem_layout = "std430",
         },
         {
             .name = "slices_buf",
@@ -348,7 +374,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .buf_content = "Slice slices[];",
             .mem_quali = "readonly",
-            // .mem_layout = "std430",
+            .mem_layout = "std430",
         },
     };
     RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 3, 1, 0));
@@ -398,17 +424,9 @@ static int vulkan_dirac_uninit(AVCodecContext *avctx) {
 static int vulkan_dirac_init(AVCodecContext *avctx)
 {
     int err = 0;
-    // VkResult ret;
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     FFVulkanContext *s;
     FFVkSPIRVCompiler *spv;
-    //
-    // VkSamplerYcbcrConversionCreateInfo yuv_sampler_info = {
-    //     .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
-    //     .components = ff_comp_identity_map,
-    //     .ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
-    //     .ycbcrRange = avctx->color_range == AVCOL_RANGE_MPEG, /* Ignored */
-    // };
 
     spv = ff_vk_spirv_init();
     if (!spv) {
@@ -422,7 +440,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     /* Initialize contexts */
     s = &dec->vkctx;
-    // vk = &dec->vkctx.vkfn;
 
     s->frames_ref = av_buffer_ref(avctx->hw_frames_ctx);
     s->frames = (AVHWFramesContext *)s->frames_ref->data;
@@ -440,18 +457,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 1, 0, 0, 0, NULL);
 
-    /* Get sampler */
-    // av_chroma_location_enum_to_pos(&cxpos, &cypos, avctx->chroma_sample_location);
-    // yuv_sampler_info.xChromaOffset = cxpos >> 7;
-    // yuv_sampler_info.yChromaOffset = cypos >> 7;
-    // yuv_sampler_info.format = s->hwfc->format[0];
-    // ret = vk->CreateSamplerYcbcrConversion(s->hwctx->act_dev, &yuv_sampler_info,
-    //                                        s->hwctx->alloc, &dec->yuv_sampler);
-    // if (ret != VK_SUCCESS) {
-    //     err = AVERROR_EXTERNAL;
-    //     goto fail;
-    // }
-
     err = ff_vk_init_sampler(&dec->vkctx, &dec->sampler, 1, VK_FILTER_LINEAR);
     if (err < 0) {
         goto fail;
@@ -462,10 +467,15 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     init_quant_shd(dec, spv);
 
     dec->quant_val_buf_ptr = NULL;
-    dec->slice_buf_ptr = NULL;
-    dec->quant_buf_ptr = NULL;
+    dec->slice_buf_ptr     = NULL;
+    dec->quant_buf_ptr     = NULL;
+
+    dec->av_quant_val_buf = NULL;
+    dec->av_quant_buf     = NULL;
+    dec->av_slice_buf     = NULL;
+
     dec->thread_buf_size = 0;
-    dec->n_slice_bufs = 0;
+    dec->n_slice_bufs    = 0;
 
     err = ff_vk_create_buf(&dec->vkctx, &dec->subband_info,
                          sizeof(SubbandOffset) * MAX_DWT_LEVELS * 12, NULL, NULL,
@@ -560,27 +570,31 @@ static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pi
     return 0;
 }
 
-static int setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
-    SubbandOffset *offs = dec->subband_info_ptr;
-    for (int plane = 0; plane < 3; plane++) {
-        for (int level = 0; level < ctx->wavelet_depth; level++) {
-            const int shift = ctx->wavelet_depth - length - 1;
-            for (int orient = 0; orient < 4; orient++) {
-                const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
-                SubbandOffset *off = &offs[idx];
-
-                off->width = ctx->plane[plane].width >> shift;
-                off->height = ctx->plane[plane].height >> shift;
-                if (level == 0) {
-                    off->left = 0;
-                    off->top = 0;
-                } else {
-
-                }
-            }
-        }
-    }
-}
+// static int setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+//     SubbandOffset *offs = dec->subband_info_ptr;
+//     for (int plane = 0; plane < 3; plane++) {
+//         Plane *p = &ctx->plane[plane];
+//         for (int level = 0; level < ctx->wavelet_depth; level++) {
+//             const int shift = ctx->wavelet_depth - length - 1;
+//             int stride = p->idwt.stride << (s->wavelet_depth - level);
+//             for (int orient = 0; orient < 4; orient++) {
+//                 const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
+//                 SubbandOffset *off = &offs[idx];
+//
+//                 off->width = ctx->plane[plane].width >> shift;
+//                 off->height = ctx->plane[plane].height >> shift;
+//                 off->left = 0;
+//                 off->top = 0;
+//
+//                 if (level & 2){
+//                     off->top += off->width;
+//                 }
+//                 if (level & 1){
+//                 }
+//             }
+//         }
+//     }
+// }
 
 static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
                                av_unused const uint8_t *buffer,
@@ -624,9 +638,14 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     VkImageView views[AV_NUM_DATA_POINTERS];
     VkImageMemoryBarrier2 img_bar[37];
     int nb_img_bar = 0;
-
     FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
+
+    memcpy(dec->quant_val_buf_vk_ptr, dec->quant_val_buf_ptr, dec->quant_val_buf_size);
+    memcpy(dec->quant_buf_vk_ptr, dec->quant_buf_ptr, dec->quant_buf_size);
+    memcpy(dec->slice_buf_vk_ptr, dec->slice_buf_ptr, dec->slice_buf_size);
+
     ff_vk_exec_start(&dec->vkctx, exec);
+    // av_log(avctx, AV_LOG_INFO, "-----------------END FRAME-----------------\n");
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
 
     ff_vk_update_push_exec(&dec->vkctx, exec, &dec->quant_pl,
@@ -665,24 +684,24 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
                                     NULL, 1, 0, 0,
-                                    dec->quant_val_buf_host.address,
-                                    dec->quant_val_buf_host.size,
+                                    dec->quant_val_buf->address,
+                                    dec->quant_val_buf->size,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
                                     NULL, 1, 1, 0,
-                                    dec->quant_buf_host.address,
-                                    dec->quant_buf_host.size,
+                                    dec->quant_buf->address,
+                                    dec->quant_buf->size,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
                                     NULL, 1, 2, 0,
-                                    dec->slice_buf_host.address,
-                                    dec->slice_buf_host.size,
+                                    dec->slice_buf->address,
+                                    dec->slice_buf->size,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
