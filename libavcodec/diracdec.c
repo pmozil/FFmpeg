@@ -1766,8 +1766,9 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
         return ret;
 
     if (avctx->hwaccel) {
-        f->width  = avctx->coded_width;
-        f->height = avctx->coded_height;
+        DiracContext *s = avctx->priv_data;
+        f->width   = CALC_PADDING(s->plane[0].width, s->wavelet_depth);
+        f->height  = CALC_PADDING(s->plane[0].height, s->wavelet_depth);
         ret = ff_get_buffer(avctx, f, flags);
         return ret;
     }

@@ -39,7 +39,6 @@ typedef  struct DiracVulkanDecodeContext {
 
     int quant_val_buf_size;
     int thread_buf_size;
-    int *quant_val_buf_ptr;
     int *quant_val_buf_vk_ptr;
     FFVkBuffer *quant_val_buf;
     AVBufferRef *av_quant_val_buf;
@@ -47,13 +46,11 @@ typedef  struct DiracVulkanDecodeContext {
 
     int n_slice_bufs;
     int slice_buf_size;
-    SliceCoeffVk *slice_buf_ptr;
     SliceCoeffVk *slice_buf_vk_ptr;
     FFVkBuffer *quant_buf;
     AVBufferRef *av_quant_buf;
     size_t quant_buf_offs;
 
-    int32_t *quant_buf_ptr;
     int32_t *quant_buf_vk_ptr;
     int quant_buf_size;
     FFVkBuffer *slice_buf;
@@ -86,29 +83,34 @@ static const char dequant[] = {
 };
 
 static const char proc_slice[] = {
-    C(0, void proc_slice(int slice_idx) {                                         )
-    C(1,    const int plane = int(gl_GlobalInvocationID.x) / 4;                   )
-    C(1,    const int orient = int(gl_GlobalInvocationID.x) % 4;                  )
-    C(1,    const int level = int(gl_GlobalInvocationID.y);                       )
-    C(1,    if ((level > 0 && orient == 0)) return;                               )
-    C(1,                                                                          )
-    C(1,    const int act_slice_idx = slice_idx * DWT_LEVELS * 3                  )
-    C(1,                                    + DWT_LEVELS * plane + level;         )
-    C(1,    const Slice s = slices[act_slice_idx];                                )
-    C(1,    int offs = s.offs + s.tot * orient;                                   )
-    C(1,                                                                          )
-    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                      )
-    C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);         )
-    C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);     )
+    C(0, void proc_slice(int slice_idx) {                                           )
+    C(1,    const int plane = int(gl_GlobalInvocationID.x) / 4;                     )
+    C(1,    const int orient = int(gl_GlobalInvocationID.x) % 4;                    )
+    C(1,    const int level = int(gl_GlobalInvocationID.y);                         )
+    C(1,    if ((level > 0 && orient == 0)) return;                                 )
+    C(1,                                                                            )
+    C(1,    const int act_slice_idx = slice_idx * DWT_LEVELS * 3                    )
+    C(1,                                    + DWT_LEVELS * plane + level;           )
+    C(1,    const int subband_idx = plane * DWT_LEVELS * 4                          )
+    C(1,                                    + 4 * + level + orient;                 )
+    C(1,    const Slice s = slices[act_slice_idx];                                  )
+    C(1,    const SubbandOffset sub_off = subband_offs[subband_idx];                )
+    C(1,    int offs = s.offs + s.tot * orient;                                     )
+    C(1,                                                                            )
+    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                        )
+    C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);           )
+    C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);       )
     // C(1,    if (s.tot_h >= 0 && s.tot_h < 20 && s.tot_v <= 20 && s.tot_h >= 0) return;  )
     // C(1,    debugPrintfEXT("Idx = %i, plane = %i, level = %i, orient = %i, tot_h = %i, tot_v = %i\n", act_slice_idx, plane, level, orient, s.tot_h, s.tot_v);)
-    C(1,    for(int y = 0; y < s.tot_v; y++) {                                          )
-    C(2,        for(int x = 0; x < s.tot_h; x++) {                                     )
-    C(3,            dequant(plane, offs, ivec2(s.left + x, s.top + y), qf, qs);   )
-    C(3,            offs++;                                                       )
-    C(2,        }                                                                 )
-    C(1,    }                                                                     )
-    C(0, }                                                                        )
+    C(1,    for(int y = 0; y < s.tot_v; y++) {                                      )
+    C(2,        for(int x = 0; x < s.tot_h; x++) {                                  )
+    C(3,            const int img_x = sub_off.left + s.left + x;                    )
+    C(3,            const int img_y = sub_off.top + s.top + y;                      )
+    C(3,            dequant(plane, offs, ivec2(img_x, img_y), qf, qs);              )
+    C(3,            offs++;                                                         )
+    C(2,        }                                                                   )
+    C(1,    }                                                                       )
+    C(0, }                                                                          )
 };
 
 static void free_common(AVCodecContext *avctx)
@@ -136,19 +138,16 @@ static void free_common(AVCodecContext *avctx)
     // if (dec->sampler)
     //     vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
-    if (dec->quant_val_buf_ptr) {
+    if (dec->quant_val_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_val_buf);
-        av_free(dec->quant_val_buf_ptr);
     }
 
-    if (dec->quant_buf_ptr) {
+    if (dec->quant_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_buf);
-        av_free(dec->quant_buf_ptr);
     }
 
-    if (dec->slice_buf_ptr) {
+    if (dec->slice_buf_vk_ptr) {
         av_buffer_unref(&dec->av_slice_buf);
-        av_free(dec->slice_buf_ptr);
     }
 
     ff_vk_free_buf(&dec->vkctx, &dec->subband_info);
@@ -218,16 +217,11 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
     dec->n_slice_bufs = length;
 
-    if (dec->slice_buf_ptr) {
+    if (dec->slice_buf_vk_ptr) {
         av_buffer_unref(&dec->av_slice_buf);
-        av_free(dec->slice_buf_ptr);
     }
 
     dec->slice_buf_size = sizeof(SliceCoeffVk) * length * 3 * MAX_DWT_LEVELS;
-    dec->slice_buf_ptr = av_mallocz(dec->slice_buf_size);
-    if (!dec->slice_buf_ptr)
-        return AVERROR(ENOMEM);
-
     err = alloc_host_mapped_buf(dec, dec->slice_buf_size,
                                 (void **)&dec->slice_buf_vk_ptr,
                                 &dec->av_slice_buf,
@@ -241,18 +235,13 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     int err, length = ctx->num_y * ctx->num_x;
 
-    if (dec->quant_buf_ptr) {
+    if (dec->quant_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_buf);
-        av_free(dec->quant_buf_ptr);
     }
 
     dec->n_slice_bufs = length;
 
     dec->quant_buf_size = sizeof(int32_t) * MAX_DWT_LEVELS * 8 * length;
-    dec->quant_buf_ptr = av_mallocz(dec->quant_buf_size);
-    if (!dec->quant_buf_ptr)
-        return AVERROR(ENOMEM);
-
     err = alloc_host_mapped_buf(dec, dec->quant_buf_size,
                                 (void **)&dec->quant_buf_vk_ptr,
                                 &dec->av_quant_buf,
@@ -287,18 +276,13 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     coef_buf_size = subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, tmp) + 8;
     coef_buf_size = (coef_buf_size << 2) + 512;
 
-    if (dec->quant_val_buf_ptr) {
+    if (dec->quant_val_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_val_buf);
-        av_free(dec->quant_val_buf_ptr);
     }
 
     dec->thread_buf_size = coef_buf_size;
 
     dec->quant_val_buf_size = dec->thread_buf_size * 3 * length;
-    dec->quant_val_buf_ptr = av_mallocz(dec->quant_val_buf_size);
-    if (!dec->quant_val_buf_ptr)
-        return AVERROR(ENOMEM);
-
     err = alloc_host_mapped_buf(dec, dec->quant_val_buf_size,
                                 (void **)&dec->quant_val_buf_vk_ptr,
                                 &dec->av_quant_val_buf,
@@ -350,6 +334,13 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(1,     int offs;        );
     GLSLC(0, };                   );
 
+    GLSLC(0, struct SubbandOffset { );
+    GLSLC(1,     int left;          );
+    GLSLC(1,     int top;           );
+    GLSLC(1,     int width;         );
+    GLSLC(1,     int height;        );
+    GLSLC(0, };                     );
+
     desc = (FFVulkanDescriptorSetBinding[])
     {
         {
@@ -376,8 +367,15 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .mem_quali = "readonly",
             .mem_layout = "std430",
         },
+        {
+            .name = "subband_buf",
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+            .buf_content = "SubbandOffset subband_offs[60];",
+            .mem_quali = "readonly",
+        },
     };
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 3, 1, 0));
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 4, 1, 0));
 
     ff_vk_add_push_constant(pl, 0, sizeof(QuantPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
 
@@ -466,9 +464,9 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     init_quant_shd(dec, spv);
 
-    dec->quant_val_buf_ptr = NULL;
-    dec->slice_buf_ptr     = NULL;
-    dec->quant_buf_ptr     = NULL;
+    dec->quant_val_buf_vk_ptr = NULL;
+    dec->slice_buf_vk_ptr     = NULL;
+    dec->quant_buf_vk_ptr     = NULL;
 
     dec->av_quant_val_buf = NULL;
     dec->av_quant_buf     = NULL;
@@ -482,7 +480,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (err < 0)
         return err;
     err = ff_vk_map_buffer(&dec->vkctx, &dec->subband_info,
@@ -561,40 +559,40 @@ static void vulkan_dirac_free_frame_priv(FFRefStructOpaque _hwctx, void *data)
     av_free(dp);
 }
 
-static int vulkan_dirac_prepare_frame(DiracVulkanDecodeContext *dec, AVFrame *pic,
-                               DiracVulkanDecodePicture *vkpic)
-{
-    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
-    vkpic->wait_semaphores = vk->WaitSemaphores;
+static void setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    SubbandOffset *offs = dec->subband_info_ptr;
+    memset(offs, 0, dec->subband_info.size);
+    for (int plane = 0; plane < 3; plane++) {
+        Plane *p = &ctx->plane[plane];
+        int w = CALC_PADDING(p->width , ctx->wavelet_depth);
+        int h = CALC_PADDING(p->height, ctx->wavelet_depth);
 
-    return 0;
+        for (int level = ctx->wavelet_depth-1; level >= 0; level--) {
+            w = w>>1;
+            h = h>>1;
+            for (int orient = !!level; orient < 4; orient++) {
+                const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
+                SubbandOffset *off = &offs[idx];
+
+                off->width = w;
+                off->height = h;
+                off->left = 0;
+                off->top = 0;
+                //
+                // for (int lev = level; lev >= 0; lev--) {
+                //     SubBand *b = &p->band[lev][orient];
+                //     off->top += b->height;
+                //     off->left += b->width;
+                // }
+
+                if (orient & 1)
+                    off->left += off->width;
+                if (orient > 1)
+                    off->top += off->height;
+            }
+        }
+    }
 }
-
-// static int setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
-//     SubbandOffset *offs = dec->subband_info_ptr;
-//     for (int plane = 0; plane < 3; plane++) {
-//         Plane *p = &ctx->plane[plane];
-//         for (int level = 0; level < ctx->wavelet_depth; level++) {
-//             const int shift = ctx->wavelet_depth - length - 1;
-//             int stride = p->idwt.stride << (s->wavelet_depth - level);
-//             for (int orient = 0; orient < 4; orient++) {
-//                 const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
-//                 SubbandOffset *off = &offs[idx];
-//
-//                 off->width = ctx->plane[plane].width >> shift;
-//                 off->height = ctx->plane[plane].height >> shift;
-//                 off->left = 0;
-//                 off->top = 0;
-//
-//                 if (level & 2){
-//                     off->top += off->width;
-//                 }
-//                 if (level & 1){
-//                 }
-//             }
-//         }
-//     }
-// }
 
 static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
                                av_unused const uint8_t *buffer,
@@ -606,14 +604,9 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
     DiracVulkanDecodePicture *pic = c->hwaccel_picture_private;
     pic->frame = c->current_picture;
 
-    err = vulkan_dirac_prepare_frame(s, c->current_picture->avframe, pic);
-    if (err < 0) {
-        return err;
-    }
-
-    if (s->quant_buf_ptr == NULL ||
-        s->slice_buf_ptr == NULL ||
-        s->quant_val_buf_ptr == NULL ||
+    if (s->quant_buf_vk_ptr == NULL ||
+        s->slice_buf_vk_ptr == NULL ||
+        s->quant_val_buf_vk_ptr == NULL ||
         c->num_x * c->num_y != s->n_slice_bufs) {
         err = alloc_quant_buf(c, s);
         if (err < 0)
@@ -624,6 +617,7 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
         err = alloc_slices_buf(c, s);
         if (err < 0)
             return err;
+        setup_subbands(c, s);
     }
 
     return 0;
@@ -639,10 +633,6 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     VkImageMemoryBarrier2 img_bar[37];
     int nb_img_bar = 0;
     FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
-
-    memcpy(dec->quant_val_buf_vk_ptr, dec->quant_val_buf_ptr, dec->quant_val_buf_size);
-    memcpy(dec->quant_buf_vk_ptr, dec->quant_buf_ptr, dec->quant_buf_size);
-    memcpy(dec->slice_buf_vk_ptr, dec->slice_buf_ptr, dec->slice_buf_size);
 
     ff_vk_exec_start(&dec->vkctx, exec);
     // av_log(avctx, AV_LOG_INFO, "-----------------END FRAME-----------------\n");
@@ -705,6 +695,13 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
+                                    NULL, 1, 3, 0,
+                                    dec->subband_info.address,
+                                    dec->subband_info.size,
+                                    VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
 
     vk->CmdDispatch(exec->buf, 12, ctx->wavelet_depth, dec->n_slice_bufs);
 
@@ -733,12 +730,12 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr)
 {
     int i, level, orientation, quant_idx;
     DiracVulkanDecodeContext *dec = s->avctx->internal->hwaccel_priv_data;
-    int *qfactor = &dec->quant_buf_ptr[jobnr * 8 * MAX_DWT_LEVELS];
+    int *qfactor = &dec->quant_buf_vk_ptr[jobnr * 8 * MAX_DWT_LEVELS];
     int *qoffset = &qfactor[4];
-    uint8_t *quant_val_base = (uint8_t *)dec->quant_val_buf_ptr;
+    uint8_t *quant_val_base = (uint8_t *)dec->quant_val_buf_vk_ptr;
     uint8_t *tmp_buf = &quant_val_base[s->thread_buf_size * 3 * jobnr];
     DiracSlice *slice = &s->slice_params_buf[jobnr];
-    SliceCoeffVk *slice_vk = &dec->slice_buf_ptr[jobnr * 3 * MAX_DWT_LEVELS];
+    SliceCoeffVk *slice_vk = &dec->slice_buf_vk_ptr[jobnr * 3 * MAX_DWT_LEVELS];
     GetBitContext *gb = &slice->gb;
 
     skip_bits_long(gb, 8*s->highquality.prefix_bytes);
