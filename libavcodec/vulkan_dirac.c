@@ -77,7 +77,7 @@ typedef  struct DiracVulkanDecodePicture {
 static const char dequant[] = {
     C(0, void dequant(int plane, int idx, ivec2 pos, float qf, float qs) {    )
     C(1,     float val = float(inBuffer[idx]);                                )
-    C(1,     val = sign(val) * (abs(val) * qf + qs) / 255.0;                  )
+    C(1,     val = sign(val) * (abs(val) * qf + qs);                          )
     C(1,     imageStore(out_img[plane], pos, vec4(val));                      )
     C(0, }                                                                    )
 };
@@ -96,17 +96,18 @@ static const char proc_slice[] = {
     C(1,    const Slice s = slices[act_slice_idx];                                  )
     C(1,    const SubbandOffset sub_off = subband_offs[subband_idx];                )
     C(1,    int offs = s.offs + s.tot * level;                                      )
-    C(1,    if (slice_idx < 5)                                                      )
     // C(1,    debugPrintfEXT("slice =  %i, plane = %i, level = %i, tot = %i\n",
     //                        slice_idx, plane, level, s.tot);                         )
     C(1,                                                                            )
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                        )
-    C(3,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);           )
-    C(3,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);       )
+    C(1,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);           )
+    C(1,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);       )
     C(1,    for(int y = 0; y < s.tot_v; y++) {                                      )
     C(2,        for(int x = 0; x < s.tot_h; x++) {                                  )
     C(3,            const int img_x = sub_off.left + s.left + x;                    )
     C(3,            const int img_y = sub_off.top + s.top + y;                      )
+    // C(3,            const int img_x =  s.left + x;                    )
+    // C(3,            const int img_y = s.top + y;                      )
     C(3,            dequant(plane, offs, ivec2(img_x, img_y), qf, qs);              )
     C(3,            offs++;                                                         )
     C(2,        }                                                                   )
@@ -338,8 +339,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(0, struct SubbandOffset { );
     GLSLC(1,     int left;          );
     GLSLC(1,     int top;           );
-    GLSLC(1,     int width;         );
-    GLSLC(1,     int height;        );
     GLSLC(0, };                     );
 
     desc = (FFVulkanDescriptorSetBinding[])
@@ -565,31 +564,15 @@ static void setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     memset(offs, 0, dec->subband_info.size);
     for (int plane = 0; plane < 3; plane++) {
         Plane *p = &ctx->plane[plane];
-        int w = CALC_PADDING(p->width , ctx->wavelet_depth);
-        int h = CALC_PADDING(p->height, ctx->wavelet_depth);
 
         for (int level = ctx->wavelet_depth-1; level >= 0; level--) {
-            w = w>>1;
-            h = h>>1;
             for (int orient = !!level; orient < 4; orient++) {
                 const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
                 SubbandOffset *off = &offs[idx];
-
-                off->width = w;
-                off->height = h;
-                off->left = 0;
-                off->top = 0;
-
-                for (int lev = level; lev >= 0; lev--) {
-                    SubBand *b = &p->band[lev][orient];
-                    off->top += b->height;
-                    off->left += b->width;
-                }
-
-                if (orient & 1)
-                    off->left += off->width;
-                if (orient > 1)
-                    off->top += off->height;
+                SubBand *b = &p->band[level][orient];
+                int w = (b->ibuf - p->idwt.buf) >> (1 + b->pshift);
+                off->left = w % p->width;
+                off->top = w / p->width;
             }
         }
     }
