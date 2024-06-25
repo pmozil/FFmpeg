@@ -1683,8 +1683,6 @@ static int dirac_decode_frame_internal(DiracContext *s)
         Plane *p       = &s->plane[comp];
         uint8_t *frame = s->current_picture->avframe->data[comp];
 
-        memcpy(frame, p->idwt.buf, p->stride * p->height);
-        continue;
         /* FIXME: small resolutions */
         for (i = 0; i < 4; i++)
             s->edge_emu_buffer[i] = s->edge_emu_buffer_base + i*FFALIGN(p->width, 16);
