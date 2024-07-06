@@ -28,8 +28,14 @@ typedef  struct DiracVulkanDecodeContext {
     VkSamplerYcbcrConversion yuv_sampler;
     VkSampler sampler;
 
-    FFVulkanPipeline wavelet_pl;
-    FFVkSPIRVShader wavelet_shd;
+    FFVulkanPipeline vert_wavelet_pl;
+    FFVkSPIRVShader vert_wavelet_shd;
+
+    FFVulkanPipeline horiz_wavelet_pl;
+    FFVkSPIRVShader horiz_wavelet_shd;
+
+    FFVulkanPipeline interleave_pl;
+    FFVkSPIRVShader interleave_shd;
 
     FFVulkanPipeline quant_pl;
     FFVkSPIRVShader quant_shd;
@@ -57,6 +63,8 @@ typedef  struct DiracVulkanDecodeContext {
     AVBufferRef *av_slice_buf;
     size_t slice_buf_offs;
 
+    AVFrame *tmp_f;
+
     FFVkBuffer subband_info;
     SubbandOffset *subband_info_ptr;
 } DiracVulkanDecodeContext;
@@ -74,65 +82,86 @@ typedef  struct DiracVulkanDecodePicture {
     DiracFrame *frame;
 } DiracVulkanDecodePicture;
 
+// static const char haar_idwt[] = {
+//     C(0, void dequant(vec4 v1, vec4 v2, int x, int y, int dw) {         )
+//     C(1,    vec4 val1 = imageLoad(image[plane],)
+//     C(0, }                                                              )
+// };
+
+static const char interleave[] = {
+    C(0, void main() {                                                                      )
+    C(1,    int plane = int(gl_GlobalInvocationID.z);                                       )
+    C(1,    if (!IS_WITHIN(ivec2(gl_GlobalInvocationID.xy), plane_sizes[plane])) return;    )
+    C(1,    int x = int(gl_GlobalInvocationID.x);                                           )
+    C(1,    int y = int(gl_GlobalInvocationID.x);                                           )
+    C(1,    vec4 val1 = imageLoad(in_img[plane], ivec2(x, y));                              )
+    C(1,    vec4 val2 = imageLoad(in_img[plane], ivec2(x + dw, y));                         )
+    C(1,    imageStore(out_img[plane], ivec2(2 * x, y), val1);                              )
+    C(1,    imageStore(out_img[plane], ivec2(2 * x + 1, y), val2);                          )
+    C(0, }                                                                                  )
+};
+
 static const char dequant[] = {
-    C(0, void dequant(int plane, int idx, ivec2 pos, float qf, float qs) {      )
-    C(1,     float val = float(inBuffer[idx]);                                  )
-    C(1,     val = sign(val) * (abs(val) * qf + qs);                            )
-    C(1,     imageStore(out_img[plane], pos, vec4(val));                        )
+    C(0, void dequant(int idx, ivec2 pos, int qf, int qs) {          )
+    C(1,    int val = inBuffer[idx];                                           )
+    C(1,    val = sign(val) * (abs(val) * qf + qs);                            )
+    C(1,    imageStore(out_img[gl_GlobalInvocationID.x], pos, vec4(val));   )
     C(0, }                                                                      )
 };
 
 static const char proc_slice[] = {
-    C(0, void proc_slice(int slice_idx) {                                           )
-    C(1,    const int plane = int(gl_GlobalInvocationID.x) / 4;                     )
-    C(1,    const int orient = int(gl_GlobalInvocationID.x) % 4;                    )
-    C(1,    const int level = int(gl_GlobalInvocationID.y);                         )
-    C(1,    if ((level > 0 && orient == 0)) return;                                 )
-    C(1,                                                                            )
-    C(1,    const int act_slice_idx = slice_idx * DWT_LEVELS * 3                    )
-    C(1,                                    + DWT_LEVELS * plane + level;           )
-    C(1,    const int subband_idx = plane * DWT_LEVELS * 4                          )
-    C(1,                                    + 4 * level + orient;                   )
-    C(1,    const Slice s = slices[act_slice_idx];                                  )
-    C(1,    const SubbandOffset sub_off = subband_offs[subband_idx];                )
-    C(1,    int offs = s.offs + s.tot * (orient - sign(level));                     )
-    C(1,                                                                            )
-    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                        )
-    C(1,    float qf = float(quantMatrix[base_idx + level * 8 + orient]);           )
-    C(1,    float qs = float(quantMatrix[base_idx + level * 8 + 4 + orient]);       )
-    C(1,    int img_idx = sub_off.base_off + s.top * sub_off.stride + s.left;       )
-    C(1,    for(int y = 0; y < s.tot_v; y++) {                                      )
-    C(2,        int img_x = img_idx % plane_width[plane];                           )
-    C(2,        int img_y = img_idx / plane_width[plane];                           )
-    C(2,        for(int x = 0; x < s.tot_h; x++) {                                  )
-    C(3,            dequant(plane, offs, ivec2(img_x, img_y), qf, qs);              )
-    C(3,            img_x++;                                                        )
-    C(3,            offs++;                                                         )
-    C(2,        }                                                                   )
-    C(2,        img_idx += sub_off.stride;                                          )
-    C(1,    }                                                                       )
-    C(0, }                                                                          )
+    C(0, void proc_slice(int slice_idx) {                                               )
+    C(1,    const int plane = int(gl_GlobalInvocationID.x);                             )
+    C(1,    const int level = int(gl_GlobalInvocationID.y);                             )
+    C(1,    if (level > wavelet_depth) return;                                          )
+    C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                            )
+    C(1,    const int act_slice_idx = slice_idx * DWT_LEVELS * 3                        )
+    C(1,                                    + DWT_LEVELS * plane + level;               )
+    C(1,    const Slice s = slices[act_slice_idx];                                      )
+    C(1,    int offs = s.offs;                                                          )
+    C(1,                                                                                )
+    C(1,    for(int orient = int(bool(level)); orient < 4; orient++) {                  )
+    C(2,        int qf = quantMatrix[base_idx + level * 8 + orient];                    )
+    C(2,        int qs = quantMatrix[base_idx + level * 8 + 4 + orient];                )
+    C(2,                                                                                )
+    C(2,        const int subband_idx = plane * DWT_LEVELS * 4                          )
+    C(2,                                        + 4 * level + orient;                   )
+    C(2,                                                                                )
+    C(2,        const SubbandOffset sub_off = subband_offs[subband_idx];                )
+    C(2,        int img_idx = sub_off.base_off + s.top * sub_off.stride + s.left;       )
+    C(2,                                                                                )
+    C(2,        for(int y = 0; y < s.tot_v; y++) {                                      )
+    C(3,            int img_y = img_idx / plane_width[plane];                           )
+    C(3,            int img_x = img_idx - (plane_width[plane] * img_y);                 )
+    C(3,            for(int x = 0; x < s.tot_h; x++) {                                  )
+    C(4,                dequant(offs, ivec2(img_x, img_y), qf, qs);              )
+    C(4,                img_x++;                                                        )
+    C(4,                offs++;                                                         )
+    C(3,            }                                                                   )
+    C(3,            img_idx += sub_off.stride;                                          )
+    C(2,        }                                                                       )
+    C(2,        offs += s.tot;                                                          )
+    C(1,    }                                                                           )
+    C(0, }                                                                              )
 };
 
 static void free_common(AVCodecContext *avctx)
 {
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
-    // FFVulkanContext *s = &dec->vkctx;
+    FFVulkanContext *s = &dec->vkctx;
     // FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
     /* Wait on and free execution pool */
-    // if (dec->exec_pool.cmd_bufs) {
-    //     ff_vk_exec_pool_free(&dec->vkctx, &dec->exec_pool);
-    // }
-    //
-    // for (int i = 0; i < MAX_AUTO_THREADS; i++) {
-    //     ff_vk_pipeline_free(s, &dec->quant_pl[i]);
-    //     ff_vk_shader_free(s, &dec->quant_shd[i]);
-    //     ff_vk_pipeline_free(&dec->vkctx, &dec->wavelet_pl[i]);
-    //     ff_vk_shader_free(&dec->vkctx, &dec->wavelet_shd[i]);
-    // }
+    if (dec->exec_pool.cmd_bufs) {
+        ff_vk_exec_pool_free(s, &dec->exec_pool);
+    }
 
-    //
+    ff_vk_pipeline_free(s, &dec->quant_pl);
+    ff_vk_shader_free(s, &dec->quant_shd);
+
+    ff_vk_pipeline_free(s, &dec->interleave_pl);
+    ff_vk_shader_free(s, &dec->interleave_shd);
+
     // if (dec->yuv_sampler)
     //     vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev, dec->yuv_sampler,
     //                                       s->hwctx->alloc);
@@ -149,6 +178,10 @@ static void free_common(AVCodecContext *avctx)
 
     if (dec->slice_buf_vk_ptr) {
         av_buffer_unref(&dec->av_slice_buf);
+    }
+
+    if (dec->tmp_f) {
+        av_frame_free(&dec->tmp_f);
     }
 
     ff_vk_free_buf(&dec->vkctx, &dec->subband_info);
@@ -318,6 +351,68 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     return 0;
 }
 
+static int init_interleave_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    const int planes = av_pix_fmt_count_planes(s->vkctx.output_format);
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->interleave_shd;
+    FFVulkanPipeline *pl = &s->interleave_pl;
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "interleave", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->interleave_shd;
+    ff_vk_shader_set_compute_sizes(shd, 16, 1, 3);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_img",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
+          .mem_quali = "readonly",
+          .dimensions = 2,
+          .elems = planes,
+        },
+        {
+          .name = "out_img",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
+          .mem_quali = "writeonly",
+          .dimensions = 2,
+          .elems = planes,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+    ff_vk_add_push_constant(pl, 0, sizeof(InterleavePushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int dw;                                            );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(interleave);
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
 {
     int err = 0;
@@ -334,17 +429,18 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->quant_shd;
+    ff_vk_shader_set_compute_sizes(shd, 3, MAX_DWT_LEVELS, 1);
 
     desc = (FFVulkanDescriptorSetBinding[])
     {
         {
           .name = "out_img",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
           .mem_quali = "writeonly",
           .dimensions = 2,
           .elems = planes,
-          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     };
     RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 1, 0, 0));
@@ -418,9 +514,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(0, void main()                                                            );
     GLSLC(0, {                                                                      );
     GLSLC(1,    int idx = int(gl_GlobalInvocationID.z);                             );
-    GLSLC(1,    for (int x = idx; x < slices_num; x += int(gl_NumWorkGroups.z)) {   );
-    GLSLC(2,        proc_slice(x);                                                  );
-    GLSLC(2,    }                                                                   );
+    GLSLC(1,    proc_slice(idx);                                                    );
     GLSLC(0, }                                                                      );
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
     RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
@@ -489,6 +583,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
     init_quant_shd(dec, spv);
+    init_interleave_shd(dec, spv);
 
     dec->quant_val_buf_vk_ptr = NULL;
     dec->slice_buf_vk_ptr     = NULL;
@@ -500,6 +595,8 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
 
     dec->thread_buf_size = 0;
     dec->n_slice_bufs    = 0;
+
+    dec->tmp_f = av_frame_alloc();
 
     err = ff_vk_create_buf(&dec->vkctx, &dec->subband_info,
                          sizeof(SubbandOffset) * MAX_DWT_LEVELS * 12, NULL, NULL,
@@ -626,9 +723,9 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
     pic->frame = c->current_picture;
 
     if (s->quant_buf_vk_ptr == NULL ||
-        s->slice_buf_vk_ptr == NULL ||
-        s->quant_val_buf_vk_ptr == NULL ||
-        c->num_x * c->num_y != s->n_slice_bufs) {
+            s->slice_buf_vk_ptr == NULL ||
+            s->quant_val_buf_vk_ptr == NULL ||
+            c->num_x * c->num_y != s->n_slice_bufs) {
         err = alloc_quant_buf(c, s);
         if (err < 0)
             return err;
@@ -641,17 +738,125 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
         setup_subbands(c, s);
     }
 
+    if (s->tmp_f->width != pic->frame->avframe->width ||
+            s->tmp_f->height != pic->frame->avframe->height) {
+        s->tmp_f->width   = pic->frame->avframe->width;
+        s->tmp_f->height  = pic->frame->avframe->height;
+        err = ff_get_buffer(avctx, s->tmp_f, 0);
+        if (err < 0)
+            return err;
+    }
+
     return 0;
 }
 
-static av_always_inline void inline quant_pl_pass(DiracVulkanDecodeContext *dec,
-                          DiracContext *ctx,
-                          DiracVulkanDecodePicture *pic,
-                          FFVkExecContext *exec,
-                          FFVulkanFunctions *vk,
-                          VkImageView *views,
-                          VkImageMemoryBarrier2 img_bar[37],
-                          int *nb_bar) {
+static av_always_inline int inline interleave_pl_pass(DiracVulkanDecodeContext *dec,
+                          DiracContext *ctx) {
+    int err, nb_img_bar = 0;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+    DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
+    VkImageView in_views[AV_NUM_DATA_POINTERS];
+    VkImageView views[AV_NUM_DATA_POINTERS];
+    VkImageMemoryBarrier2 img_bar[37];
+    FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
+
+    ff_vk_exec_start(&dec->vkctx, exec);
+
+    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_create_imageviews(&dec->vkctx, exec, views, pic->frame->avframe);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, dec->tmp_f,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_create_imageviews(&dec->vkctx, exec, in_views, dec->tmp_f);
+    if (err < 0)
+        goto fail;
+
+    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->interleave_pl);
+
+    ff_vk_update_descriptor_img_array(&dec->vkctx, &dec->interleave_pl,
+                                      exec, pic->frame->avframe, in_views, 0, 0,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      dec->sampler);
+
+    ff_vk_update_descriptor_img_array(&dec->vkctx, &dec->interleave_pl,
+                                      exec, pic->frame->avframe, views, 0, 1,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      dec->sampler);
+
+    ff_vk_update_push_exec(&dec->vkctx, exec, &dec->quant_pl,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(QuantPushConst), &(QuantPushConst) {
+                            .plane_dims = {
+                                ctx->plane[0].width,
+                                ctx->plane[0].height,
+                                ctx->plane[0].width  >> (ctx->chroma_x_shift),
+                                ctx->plane[0].height >> (ctx->chroma_x_shift),
+                                ctx->plane[0].width  >> (ctx->chroma_x_shift),
+                                ctx->plane[0].height >> (ctx->chroma_x_shift),
+                                },
+                           });
+
+    ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
+                        img_bar, &nb_img_bar,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        VK_QUEUE_FAMILY_IGNORED);
+
+    ff_vk_frame_barrier(&dec->vkctx, exec, dec->tmp_f,
+                        img_bar, &nb_img_bar,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_SHADER_READ_BIT,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        VK_QUEUE_FAMILY_IGNORED);
+
+    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pImageMemoryBarriers = img_bar,
+            .imageMemoryBarrierCount = nb_img_bar,
+        });
+
+    vk->CmdDispatch(exec->buf, ctx->plane[0].width, ctx->plane[0].height, 3);
+    return ff_vk_exec_submit(&dec->vkctx, exec);
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
+}
+
+static av_always_inline int inline quant_pl_pass(DiracVulkanDecodeContext *dec,
+                          DiracContext *ctx) {
+    int err, nb_img_bar = 0;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+    DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
+    VkImageView views[AV_NUM_DATA_POINTERS];
+    VkImageMemoryBarrier2 img_bar[37];
+    FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
+
+    ff_vk_exec_start(&dec->vkctx, exec);
+
+    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_create_imageviews(&dec->vkctx, exec, views, pic->frame->avframe);
+    if (err < 0)
+        goto fail;
+
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
 
     ff_vk_update_descriptor_img_array(&dec->vkctx, &dec->quant_pl,
@@ -672,7 +877,7 @@ static av_always_inline void inline quant_pl_pass(DiracVulkanDecodeContext *dec,
                            });
 
     ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
-                        img_bar, nb_bar,
+                        img_bar, &nb_img_bar,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_SHADER_WRITE_BIT,
@@ -682,41 +887,26 @@ static av_always_inline void inline quant_pl_pass(DiracVulkanDecodeContext *dec,
     vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
             .pImageMemoryBarriers = img_bar,
-            .imageMemoryBarrierCount = *nb_bar,
+            .imageMemoryBarrierCount = nb_img_bar,
         });
 
-    vk->CmdDispatch(exec->buf, 12, ctx->wavelet_depth, dec->n_slice_bufs);
+    vk->CmdDispatch(exec->buf, 3, MAX_DWT_LEVELS, dec->n_slice_bufs);
+    return ff_vk_exec_submit(&dec->vkctx, exec);
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
 }
 
 static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     int err;
     DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
-    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
     DiracContext *ctx = avctx->priv_data;
-    DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
-    VkImageView views[AV_NUM_DATA_POINTERS];
-    VkImageMemoryBarrier2 img_bar[37];
-    int nb_img_bar = 0;
-    FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
 
-    ff_vk_exec_start(&dec->vkctx, exec);
-    // av_log(avctx, AV_LOG_INFO, "-----------------END FRAME-----------------\n");
-
-    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
-                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    err = quant_pl_pass(dec, ctx);
     if (err < 0)
-        goto fail;
-    err = ff_vk_create_imageviews(&dec->vkctx, exec, views, pic->frame->avframe);
-    if (err < 0)
-        goto fail;
+        return err;
 
-    quant_pl_pass(dec, ctx, pic, exec, vk, views, img_bar, &nb_img_bar);
-
-    return ff_vk_exec_submit(&dec->vkctx, exec);
-fail:
-    ff_vk_exec_discard_deps(&dec->vkctx, exec);
-    return err;
+    return 0;
 }
 
 static int vulkan_dirac_update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
@@ -837,5 +1027,4 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .update_thread_context = &vulkan_dirac_update_thread_context,
     .priv_data_size        = sizeof(DiracVulkanDecodeContext),
     .caps_internal         = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
-    // .caps_internal         = HWACCEL_CAP_ASYNC_SAFE,
 };
