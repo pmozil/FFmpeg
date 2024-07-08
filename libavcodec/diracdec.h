@@ -288,7 +288,7 @@ typedef struct SubbandOffset {
 
 typedef struct InterleavePushConst {
     int plane_dims[6];
-    int dw;
+    int dw[3];
 } InterleavePushConst;
 
 #endif
