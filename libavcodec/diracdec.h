@@ -268,6 +268,7 @@ typedef struct QuantPushConst {
     int wavelet_depth;
     int slices_num;
     int plane_width[3];
+    int plane_offs[3];
 } QuantPushConst;
 
 typedef struct SliceCoeffVk {
@@ -288,6 +289,7 @@ typedef struct SubbandOffset {
 
 typedef struct InterleavePushConst {
     int plane_dims[6];
+    int plane_offs[3];
     int dw[3];
 } InterleavePushConst;
 
