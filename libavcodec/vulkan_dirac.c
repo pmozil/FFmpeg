@@ -389,7 +389,7 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     RET(ff_vk_shader_init(pl, shd, "cpy_to_image", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->cpy_to_image_shd;
-    ff_vk_shader_set_compute_sizes(shd, 16, 16, 1);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     desc = (FFVulkanDescriptorSetBinding[])
     {
@@ -424,22 +424,23 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(0,                                                        );
 
     GLSLC(0, void main() {                                                              );
-    GLSLC(1,    int x = int(gl_GlobalInvocationID.x) * 4;                               );
-    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
+    GLSLC(1,    int x = int(gl_GlobalInvocationID.x) * 2;                               );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y) * 2;                               );
     GLSLC(1,    for (int plane = 0; plane < 3; plane++) {                               );
     GLSLC(2,        if (!IS_WITHIN(ivec2(x, y), plane_sizes[plane])) return;            );
-    GLSLC(2,        int idx = y * act_plane_sizes[plane].x + x;                         );
-    GLSLC(2,        float val = (128.0 + inBuf[idx + plane_offs[plane]]) / 255.0;       );
+    GLSLC(2,        int idx = plane_offs[plane] + y * act_plane_sizes[plane].x + x;     );
+    GLSLC(2,        float val = (128.0 + inBuf[idx]) / 255.0;                           );
     GLSLC(2,        imageStore(out_img[plane], ivec2(x, y), vec4(val));                 );
     GLSLC(2,                                                                            );
-    GLSLC(2,        val = (128.0 + inBuf[idx + plane_offs[plane] + 1]) / 255.0;         );
+    GLSLC(2,        val = (128.0 + inBuf[idx + 1]) / 255.0;                             );
     GLSLC(2,        imageStore(out_img[plane], ivec2(x + 1, y), vec4(val));             );
     GLSLC(2,                                                                            );
-    GLSLC(2,        val = (128.0 + inBuf[idx + plane_offs[plane] + 2]) / 255.0;         );
-    GLSLC(2,        imageStore(out_img[plane], ivec2(x + 2, y), vec4(val));             );
+    GLSLC(2,        idx += act_plane_sizes[plane].x;                                    );
+    GLSLC(2,        val = (128.0 + inBuf[idx]) / 255.0;                                 );
+    GLSLC(2,        imageStore(out_img[plane], ivec2(x, y + 1), vec4(val));             );
     GLSLC(2,                                                                            );
-    GLSLC(2,        val = (128.0 + inBuf[idx + plane_offs[plane] + 3]) / 255.0;         );
-    GLSLC(2,        imageStore(out_img[plane], ivec2(x + 3, y), vec4(val));             );
+    GLSLC(2,        val = (128.0 + inBuf[idx + 1]) / 255.0;                             );
+    GLSLC(2,        imageStore(out_img[plane], ivec2(x + 1, y + 1), vec4(val));         );
     GLSLC(1,    }                                                                       );
     GLSLC(0, }                                                                          );
 
@@ -512,8 +513,6 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
                                 },
                            });
 
-    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl);
-
     buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
         .srcStageMask = dec->tmp_buf.stage,
@@ -527,25 +526,6 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
         .offset = 0,
     };
 
-    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pBufferMemoryBarriers = buf_bar + prev_nb_bar,
-            .bufferMemoryBarrierCount = *nb_buf_bar - prev_nb_bar,
-        });
-
-    vk->CmdDispatch(exec->buf,
-                    ctx->plane[0].width >> 2,
-                    ctx->plane[0].height,
-                    1);
-
-    ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
-                        img_bar, nb_img_bar,
-                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_IMAGE_LAYOUT_GENERAL,
-                        VK_QUEUE_FAMILY_IGNORED);
-
     ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
                         img_bar, nb_img_bar,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -556,9 +536,32 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
 
     vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pBufferMemoryBarriers = buf_bar + prev_nb_bar,
+            .bufferMemoryBarrierCount = *nb_buf_bar - prev_nb_bar,
             .pImageMemoryBarriers = img_bar + prev_nb_img_bar,
             .imageMemoryBarrierCount = *nb_img_bar - prev_nb_img_bar,
         });
+
+    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl);
+
+    vk->CmdDispatch(exec->buf,
+                    ctx->plane[0].width >> 1,
+                    ctx->plane[0].height >> 1,
+                    1);
+    //
+    // ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe,
+    //                     img_bar, nb_img_bar,
+    //                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    //                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    //                     VK_ACCESS_SHADER_WRITE_BIT,
+    //                     VK_IMAGE_LAYOUT_GENERAL,
+    //                     VK_QUEUE_FAMILY_IGNORED);
+    //
+    // vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+    //         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+    //         .pImageMemoryBarriers = img_bar + prev_nb_img_bar,
+    //         .imageMemoryBarrierCount = *nb_img_bar - prev_nb_img_bar,
+    //     });
 
     return 0;
 }
@@ -619,7 +622,7 @@ static const char haari_horiz[] = {
     C(1,    float val_orig0 = inBuf[offs0];                                     )
     C(1,    float val_orig1 = inBuf[offs1];                                     )
     C(1,    float val_new0 = val_orig0 - val_orig1 * 0.5;                       )
-    C(1,    float val_new1 = val_orig1 + val_new0;                              )
+    C(1,    float val_new1 = val_orig1 + val_orig0;                             )
     C(1,    outBuf[outIdx] = val_new0;                                          )
     C(1,    outBuf[outIdx + 1] = val_new1;                                      )
     C(0, }                                                                      )
@@ -690,12 +693,12 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCom
     GLSLD(haari_vert);
 
     GLSLC(0, void main() {                                                                      );
-    GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                           );
-    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                           );
+    GLSLC(1,    int x = int(gl_GlobalInvocationID.x) * 2;                                       );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y) * 2;                                       );
     GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                       );
-    GLSLC(2,        if (!IS_WITHIN(ivec2(2 * x, y * 2), plane_sizes[pic_z])) return;            );
-    GLSLC(2,        idwt_vert(pic_z, 2 * x, y * 2);                                             );
-    GLSLC(2,        idwt_vert(pic_z, 2 * x + 1, y * 2);                                         );
+    GLSLC(2,        if (!IS_WITHIN(ivec2(x, y), plane_sizes[pic_z])) return;                    );
+    GLSLC(2,        idwt_vert(pic_z, x, y);                                                     );
+    GLSLC(2,        idwt_vert(pic_z, x + 1, y);                                                 );
     GLSLC(1,    }                                                                               );
     GLSLC(0, }                                                                                  );
 
@@ -763,11 +766,12 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCo
     GLSLD(haari_horiz);
 
     GLSLC(0, void main() {                                                                      );
-    GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                           );
+    GLSLC(1,    int x = 2 * int(gl_GlobalInvocationID.x);                                       );
     GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                           );
     GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                       );
-    GLSLC(2,        if (!IS_WITHIN(ivec2(x + dw[pic_z], y), plane_sizes[pic_z])) return;      );
+    GLSLC(2,        if (!IS_WITHIN(ivec2(x + dw[pic_z], y), plane_sizes[pic_z])) continue;      );
     GLSLC(2,        idwt_horiz(pic_z, x, y);                                                    );
+    GLSLC(2,        idwt_horiz(pic_z, x + 1, y);                                                );
     GLSLC(1,    }                                                                               );
     GLSLC(0, }                                                                                  );
 
@@ -789,7 +793,8 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
                           VkBufferMemoryBarrier2 *buf_bar,
                           int *nb_buf_bar, int shift) {
     int err;
-    const int wavelet_idx = DWT_DIRAC_HAAR0 + shift;
+    int barrier_num = *nb_buf_bar;
+    const int wavelet_idx = DWT_DIRAC_HAAR0;
     WaveletPushConst pConst = {0};
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
@@ -831,16 +836,67 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
     if (err < 0)
         goto fail;
 
+    barrier_num = *nb_buf_bar;
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = buf1->stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = buf1->access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf1->buf,
+        .size = buf1->size,
+        .offset = 0,
+    };
+
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = buf2->stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = buf2->access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf2->buf,
+        .size = buf2->size,
+        .offset = 0,
+    };
+
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = buf2->stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = buf2->access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf2->buf,
+        .size = buf2->size,
+        .offset = 0,
+    };
+
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = buf1->stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = buf1->access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf1->buf,
+        .size = buf1->size,
+        .offset = 0,
+    };
+
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        int barrier_num = *nb_buf_bar;
-
         pConst.real_plane_dims[0] = ctx->plane[0].width  << i;
         pConst.real_plane_dims[1] = ctx->plane[0].height << i;
-        pConst.real_plane_dims[2] = ctx->plane[1].width  << i;
-        pConst.real_plane_dims[3] = ctx->plane[1].height << i;
-        pConst.real_plane_dims[4] = ctx->plane[2].width  << i;
-        pConst.real_plane_dims[5] = ctx->plane[2].height << i;
+        pConst.real_plane_dims[2] = (ctx->plane[1].width  >> ctx->chroma_x_shift) << i;
+        pConst.real_plane_dims[3] = (ctx->plane[1].height >> ctx->chroma_y_shift) << i;
+        pConst.real_plane_dims[4] = (ctx->plane[2].width  >> ctx->chroma_x_shift) << i;
+        pConst.real_plane_dims[5] = (ctx->plane[2].height >> ctx->chroma_y_shift) << i;
 
         pConst.plane_dims[0] = ctx->plane[0].width  >> i;
         pConst.plane_dims[1] = ctx->plane[0].height >> i;
@@ -858,63 +914,47 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
         pConst.dw[1] = ctx->plane[1].width  >> (ctx->chroma_x_shift + i + 1);
         pConst.dw[2] = ctx->plane[2].width  >> (ctx->chroma_x_shift + i + 1);
 
+        /* Horizontal wavelet pass */
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
+
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(WaveletPushConst), &pConst);
+
+        vk->CmdDispatch(exec->buf, pConst.plane_dims[0] >> 2, pConst.plane_dims[1], 1);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
         /* Vertical wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,
                                VK_SHADER_STAGE_COMPUTE_BIT,
                                0, sizeof(WaveletPushConst), &pConst);
 
-
-        buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .srcStageMask = buf1->stage,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            .srcAccessMask = buf1->access,
-            .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = buf1->buf,
-            .size = buf1->size,
-            .offset = 0,
-        };
-
         vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                 .pBufferMemoryBarriers = buf_bar + barrier_num,
-                .bufferMemoryBarrierCount = 1,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
         });
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
 
         vk->CmdDispatch(exec->buf, pConst.plane_dims[0] >> 1, pConst.plane_dims[1] >> 1, 1);
 
-        /* Horizontal wavelet pass */
-        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
-                            VK_SHADER_STAGE_COMPUTE_BIT,
-                            0, sizeof(WaveletPushConst), &pConst);
-
-        barrier_num = *nb_buf_bar;
-        buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .srcStageMask = buf2->stage,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            .srcAccessMask = buf2->access,
-            .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = buf2->buf,
-            .size = buf2->size,
-            .offset = 0,
-        };
-
         vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                 .pBufferMemoryBarriers = buf_bar + barrier_num,
-                .bufferMemoryBarrierCount = 1,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
         });
-
-        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
-
-        vk->CmdDispatch(exec->buf, pConst.plane_dims[0] >> 1, pConst.plane_dims[1], 1);
     }
 
     return 0;
@@ -936,7 +976,7 @@ static const char dequant[] = {
 static const char proc_slice[] = {
     C(0, void proc_slice(int slice_idx) {                                                       )
     C(1,    const int plane = int(gl_GlobalInvocationID.x) / 4;                                 )
-    C(1,    const int base_y = int(gl_GlobalInvocationID.x) & 3;                                )
+    C(1,    const int base_y = int(gl_GlobalInvocationID.x) % 4;                                )
     C(1,    const int level = int(gl_GlobalInvocationID.y);                                     )
     C(1,    if (level >= wavelet_depth) return;                                                 )
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                                    )
@@ -984,7 +1024,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->quant_shd;
-    ff_vk_shader_set_compute_sizes(shd, 3, MAX_DWT_LEVELS, 1);
+    // ff_vk_shader_set_compute_sizes(shd, 3, MAX_DWT_LEVELS, 1);
 
     desc = (FFVulkanDescriptorSetBinding[])
     {
@@ -1097,7 +1137,7 @@ static av_always_inline int inline quant_pl_pass(DiracVulkanDecodeContext *dec,
                           FFVkExecContext *exec,
                           VkBufferMemoryBarrier2 *buf_bar,
                           int *nb_buf_bar) {
-    int err;
+    int err, nb_bar;
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
@@ -1208,6 +1248,39 @@ static av_always_inline int inline quant_pl_pass(DiracVulkanDecodeContext *dec,
         });
 
     vk->CmdDispatch(exec->buf, 12, MAX_DWT_LEVELS, dec->n_slice_bufs);
+
+    nb_bar = *nb_buf_bar;
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = dec->tmp_buf.stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = dec->tmp_buf.access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = dec->tmp_buf.buf,
+        .size = dec->tmp_buf.size,
+        .offset = 0,
+    };
+
+    buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = dec->tmp_buf.stage,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = dec->tmp_buf.access,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = dec->tmp_buf.buf,
+        .size = dec->tmp_buf.size,
+        .offset = 0,
+    };
+
+    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pBufferMemoryBarriers = buf_bar + nb_bar,
+            .bufferMemoryBarrierCount = *nb_buf_bar - nb_bar,
+        });
 
     return 0;
 }
@@ -1450,8 +1523,8 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     DiracVulkanDecodeContext*dec = avctx->internal->hwaccel_priv_data;
     DiracContext *ctx = avctx->priv_data;
     VkImageView views[AV_NUM_DATA_POINTERS];
-    VkBufferMemoryBarrier2 buf_bar[60];
-    VkImageMemoryBarrier2 img_bar[60];
+    VkBufferMemoryBarrier2 buf_bar[80];
+    VkImageMemoryBarrier2 img_bar[80];
     DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
     FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
 
