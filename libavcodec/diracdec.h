@@ -264,11 +264,4 @@ typedef struct SliceCoeffs {
     int tot;
 } SliceCoeffs;
 
-typedef struct SubbandOffset {
-    int left;
-    int top;
-    int base_off;
-    int stride;
-} SubbandOffset;
-
 #endif
