@@ -1694,6 +1694,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
             if (ret < 0)
                 return ret;
         }
+
         ret = ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2,
                                    s->wavelet_depth, s->bit_depth);
         if (ret < 0)
