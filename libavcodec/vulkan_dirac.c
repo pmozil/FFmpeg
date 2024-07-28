@@ -538,6 +538,343 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
     return 0;
 }
 
+/* ----- LeGall Wavelet init and pipeline pass ----- */
+
+static const char legall_vert[] = {
+    C(0, void idwt_vert(int plane, int x, int y) {                                      )
+    C(1,    const int h = plane_sizes[plane].y;                                         )
+    C(1,                                                                                )
+    C(1,    const int y0 = y;                                                           )
+    C(1,    const int in0 = plane_offs[plane] + y0 * plane_strides[plane] + x;          )
+    C(1,    const int32_t val0 = inBuf[in0];                                            )
+    C(1,                                                                                )
+    C(1,    const int y1 = int((y - 1) >= 0) * (y - 1) + int((y - 1) < 0) * 1;          )
+    C(1,    const int in1 = plane_offs[plane] + y1 * plane_strides[plane] + x;          )
+    C(1,    const int32_t val1 = inBuf[in1];                                            )
+    C(1,                                                                                )
+    C(1,    const int y2 = y + 1;                                                       )
+    C(1,    const int in2 = plane_offs[plane] + y2 * plane_strides[plane] + x;          )
+    C(1,    const int32_t val2 = inBuf[in2];                                            )
+    C(1,                                                                                )
+    C(1,    const int y3 = int((y + 2) < h) * (y + 2) + int((y + 2) >= h) * (h - 2);    )
+    C(1,    const int in3 = plane_offs[plane] + y3 * plane_strides[plane] + x;          )
+    C(1,    const int32_t val3 = inBuf[in3];                                            )
+    C(1,                                                                                )
+    C(1,    const int32_t out0 = val0 - ((val1 + val2 + 2) >> 2);                       )
+    C(1,    outBuf[in0] = out0;                                                         )
+    C(1,                                                                                )
+    C(1,    const int32_t out1 = val2 + ((val0 + val3 + 1) >> 1);                       )
+    C(1,    outBuf[in2] = out0;                                                         )
+    C(0, }                                                                              )
+};
+
+static const char legall_horiz[] = {
+    C(0, void idwt_vert(int plane, int x, int y) {                                      )
+    C(1,    const int w = plane_sizes[plane].w;                                         )
+    C(1,                                                                                )
+    C(1,    const int x0 = y;                                                           )
+    C(1,    const int in0 = plane_offs[plane] + y * plane_strides[plane] + x0;          )
+    C(1,    const int32_t val0 = inBuf[in0];                                            )
+    C(1,                                                                                )
+    C(1,    const int x1 = int((x - 1) >= 0) * (x - 1) + int((x - 1) < 0) * 1;          )
+    C(1,    const int in1 = plane_offs[plane] + y * plane_strides[plane] + x1;          )
+    C(1,    const int32_t val1 = inBuf[in1];                                            )
+    C(1,                                                                                )
+    C(1,    const int x2 = x + 1;                                                       )
+    C(1,    const int in2 = plane_offs[plane] + y * plane_strides[plane] + x2;          )
+    C(1,    const int32_t val2 = inBuf[in2];                                            )
+    C(1,                                                                                )
+    C(1,    const int x3 = int((x + 2) < w) * (x + 2) + int((x + 2) >= w) * (w - 2);    )
+    C(1,    const int in3 = plane_offs[plane] + y3 * plane_strides[plane] + x;          )
+    C(1,    const int32_t val3 = inBuf[in3];                                            )
+    C(1,                                                                                )
+    C(1,    const int32_t out0 = val0 - ((val1 + val2 + 2) >> 2);                       )
+    C(1,    outBuf[in0] = out0;                                                         )
+    C(1,                                                                                )
+    C(1,    const int32_t out1 = val2 + ((val0 + val3 + 1) >> 1);                       )
+    C(1,    outBuf[in2] = out0;                                                         )
+    C(0, }                                                                              )
+};
+
+static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    int wavelet_idx = DWT_DIRAC_LEGALL5_3;
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->vert_wavelet_shd[wavelet_idx];
+    FFVulkanPipeline *pl = &s->vert_wavelet_pl[wavelet_idx];
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "legall_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->vert_wavelet_shd[wavelet_idx];
+    /*ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);*/
+
+    GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
+    GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t inBuf[];",
+          .mem_quali = "readonly",
+          .dimensions = 1,
+        },
+        {
+          .name = "out_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t outBuf[];",
+          .mem_quali = "writeonly",
+          .dimensions = 1,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+
+    ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int plane_offs[3];                                 );
+    GLSLC(1,     int plane_strides[3];                              );
+    GLSLC(1,     int dw[3];                                         );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(legall_vert);
+
+    GLSLC(0, void main() {                                                                      );
+    GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                           );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                           );
+    GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                       );
+    GLSLC(2,        if (!IS_WITHIN(ivec2(x, y), plane_sizes[pic_z])) return;                    );
+    GLSLC(2,        idwt_vert(pic_z, x, y);                                                     );
+    GLSLC(2,        memoryBarrier();                                                            );
+    GLSLC(1,    }                                                                               );
+    GLSLC(0, }                                                                                  );
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
+static int init_wavelet_shd_legall_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    int wavelet_idx = DWT_DIRAC_LEGALL5_3;
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->horiz_wavelet_shd[wavelet_idx];
+    FFVulkanPipeline *pl = &s->horiz_wavelet_pl[wavelet_idx];
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "haari_horiz", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->horiz_wavelet_shd[wavelet_idx];
+    /*ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);*/
+
+    GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
+    GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t inBuf[];",
+          .mem_quali = "readonly",
+          .dimensions = 1,
+        },
+        {
+          .name = "out_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t outBuf[];",
+          .mem_quali = "writeonly",
+          .dimensions = 1,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+
+    ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int plane_offs[3];                                 );
+    GLSLC(1,     int plane_strides[3];                              );
+    GLSLC(1,     int dw[3];                                         );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(legall_horiz);
+
+    GLSLC(0, void main() {                                                                      );
+    GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                           );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                           );
+    GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                       );
+    GLSLC(2,        if (!IS_WITHIN(ivec2(x + dw[pic_z], y), plane_sizes[pic_z])) continue;      );
+    GLSLC(2,        idwt_horiz(pic_z, x, y);                                                    );
+    GLSLC(2,        memoryBarrier();                                                            );
+    GLSLC(1,    }                                                                               );
+    GLSLC(0, }                                                                                  );
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
+static av_always_inline int inline wavelet_legall_pass(DiracVulkanDecodeContext *dec,
+                          DiracContext *ctx,
+                          FFVkExecContext *exec,
+                          VkBufferMemoryBarrier2 *buf_bar,
+                          int *nb_buf_bar) {
+    int err;
+    int barrier_num = *nb_buf_bar;
+    int wavelet_idx = DWT_DIRAC_LEGALL5_3;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+
+    FFVulkanPipeline *pl_hor = &dec->horiz_wavelet_pl[wavelet_idx];
+    FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
+
+    for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
+        dec->pConst.plane_strides[0] = (ctx->plane[0].idwt.stride << i) >> (1 + ctx->pshift);
+        dec->pConst.plane_strides[1] = (ctx->plane[1].idwt.stride << i) >> (1 + ctx->pshift);
+        dec->pConst.plane_strides[2] = (ctx->plane[2].idwt.stride << i) >> (1 + ctx->pshift);
+
+        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
+        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
+        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
+
+        dec->pConst.real_plane_dims[0] = ctx->plane[0].idwt.width ;
+        dec->pConst.real_plane_dims[1] = ctx->plane[0].idwt.height;
+        dec->pConst.real_plane_dims[2] = ctx->plane[1].idwt.width ;
+        dec->pConst.real_plane_dims[3] = ctx->plane[1].idwt.height;
+        dec->pConst.real_plane_dims[4] = ctx->plane[2].idwt.width ;
+        dec->pConst.real_plane_dims[5] = ctx->plane[2].idwt.height;
+
+        /* Vertical wavelet pass */
+        /*ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);*/
+        /*ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,*/
+        /*                       VK_SHADER_STAGE_COMPUTE_BIT,*/
+        /*                       0, sizeof(WaveletPushConst), &dec->pConst);*/
+        /**/
+        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
+        /*                                  0, 0, 0,*/
+        /*                                  dec->tmp_buf.address,*/
+        /*                                  dec->tmp_buf.size,*/
+        /*                                  VK_FORMAT_UNDEFINED);*/
+        /*if (err < 0)*/
+        /*    goto fail;*/
+        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
+        /*                                  0, 1, 0,*/
+        /*                                  dec->tmp_interleave_buf.address,*/
+        /*                                  dec->tmp_interleave_buf.size,*/
+        /*                                  VK_FORMAT_UNDEFINED);*/
+        /*if (err < 0)*/
+        /*    goto fail;*/
+        /**/
+        /*barrier_num = *nb_buf_bar;*/
+        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
+        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
+        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
+        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
+        /**/
+        /*vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {*/
+        /*        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,*/
+        /*        .pBufferMemoryBarriers = buf_bar + barrier_num,*/
+        /*        .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,*/
+        /*});*/
+        /**/
+        /*vk->CmdDispatch(exec->buf,*/
+        /*                dec->pConst.real_plane_dims[0],*/
+        /*                dec->pConst.real_plane_dims[1] >> 1,*/
+        /*                1);*/
+
+        /* Horizontal wavelet pass */
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(WaveletPushConst), &dec->pConst);
+
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                          0, i % 2, 0,
+                                          dec->tmp_interleave_buf.address,
+                                          dec->tmp_interleave_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                          0, (i + 1) % 2, 0,
+                                          dec->tmp_buf.address,
+                                          dec->tmp_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0] >> 1,
+                        dec->pConst.real_plane_dims[1],
+                        1);
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+    }
+
+    return 0;
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
+}
+
+
 /* ----- Haar Wavelet init and pipeline pass ----- */
 
 static const char haari_horiz[] = {
