@@ -1102,42 +1102,42 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
         dec->pConst.real_plane_dims[5] = ctx->plane[2].idwt.height;
 
         /* Vertical wavelet pass */
-        /*ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);*/
-        /*ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,*/
-        /*                       VK_SHADER_STAGE_COMPUTE_BIT,*/
-        /*                       0, sizeof(WaveletPushConst), &dec->pConst);*/
-        /**/
-        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
-        /*                                  0, 0, 0,*/
-        /*                                  dec->tmp_buf.address,*/
-        /*                                  dec->tmp_buf.size,*/
-        /*                                  VK_FORMAT_UNDEFINED);*/
-        /*if (err < 0)*/
-        /*    goto fail;*/
-        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
-        /*                                  0, 1, 0,*/
-        /*                                  dec->tmp_interleave_buf.address,*/
-        /*                                  dec->tmp_interleave_buf.size,*/
-        /*                                  VK_FORMAT_UNDEFINED);*/
-        /*if (err < 0)*/
-        /*    goto fail;*/
-        /**/
-        /*barrier_num = *nb_buf_bar;*/
-        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
-        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
-        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
-        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
-        /**/
-        /*vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {*/
-        /*        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,*/
-        /*        .pBufferMemoryBarriers = buf_bar + barrier_num,*/
-        /*        .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,*/
-        /*});*/
-        /**/
-        /*vk->CmdDispatch(exec->buf,*/
-        /*                dec->pConst.real_plane_dims[0],*/
-        /*                dec->pConst.real_plane_dims[1] >> 1,*/
-        /*                1);*/
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,
+                               VK_SHADER_STAGE_COMPUTE_BIT,
+                               0, sizeof(WaveletPushConst), &dec->pConst);
+
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
+                                          0, 0, 0,
+                                          dec->tmp_buf.address,
+                                          dec->tmp_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
+                                          0, 1, 0,
+                                          dec->tmp_interleave_buf.address,
+                                          dec->tmp_interleave_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0],
+                        dec->pConst.real_plane_dims[1] >> 1,
+                        1);
 
         /* Horizontal wavelet pass */
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
@@ -1713,9 +1713,9 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
-    /*err = wavelet_haari_pass(dec, ctx, exec, buf_bar, &nb_buf_bar, 0);*/
-    /*if (err < 0)*/
-    /*    goto fail;*/
+    err = wavelet_haari_pass(dec, ctx, exec, buf_bar, &nb_buf_bar, 0);
+    if (err < 0)
+        goto fail;
 
     err = cpy_to_image_pass(dec, ctx, exec, views,
                             buf_bar, &nb_buf_bar, img_bar, &nb_img_bar);

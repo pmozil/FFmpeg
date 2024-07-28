@@ -1760,13 +1760,13 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
 {
     int ret, i;
     int chroma_x_shift, chroma_y_shift;
-    ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift,
+    DiracContext *s = avctx->priv_data;
+    ret = av_pix_fmt_get_chroma_sub_sample(s->sof_pix_fmt, &chroma_x_shift,
                                            &chroma_y_shift);
     if (ret < 0)
         return ret;
 
     if (avctx->hwaccel) {
-        DiracContext *s = avctx->priv_data;
         f->width   = s->plane[0].width;
         f->height  = s->plane[0].height;
         ret = ff_get_buffer(avctx, f, flags);
@@ -1982,7 +1982,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
 
-        ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
+        ret = av_pix_fmt_get_chroma_sub_sample(s->sof_pix_fmt,
                                                &s->chroma_x_shift,
                                                &s->chroma_y_shift);
         if (ret < 0)
