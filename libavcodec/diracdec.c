@@ -1767,17 +1767,17 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
     if (ret < 0)
         return ret;
 
-    if (avctx->hwaccel) {
-        f->width   = s->plane[0].width;
-        f->height  = s->plane[0].height;
-        ret = ff_get_buffer(avctx, f, flags);
-        return ret;
-    }
+    /*if (avctx->hwaccel) {*/
+    /*    f->width   = s->plane[0].width;*/
+    /*    f->height  = s->plane[0].height;*/
+    /*    ret = ff_get_buffer(avctx, f, flags);*/
+    /*    return ret;*/
+    /*}*/
 
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
     ret = ff_get_buffer(avctx, f, flags);
-    if (ret < 0)
+    if (ret < 0 || avctx->hwaccel)
         return ret;
 
     for (i = 0; f->data[i]; i++) {
@@ -2013,9 +2013,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         }
 
         /* find an unused frame */
-        for (i = 0; i < MAX_FRAMES; i++)
+        for (i = 0; i < MAX_FRAMES; i++) 
             if (s->all_frames[i].avframe->data[0] == NULL)
                 pic = &s->all_frames[i];
+
         if (!pic) {
             av_log(avctx, AV_LOG_ERROR, "framelist full\n");
             return AVERROR_INVALIDDATA;
