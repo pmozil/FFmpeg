@@ -439,15 +439,21 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(0,                                                        );
 
     GLSLC(0, void main() {                                                              );
-    GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                   );
     GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
     GLSLC(1,    int plane = int(gl_GlobalInvocationID.z);                               );
-    GLSLC(1,    if (!IS_WITHIN(ivec2(x, y), imageSize(out_img[plane]))) return;         );
-    GLSLC(1,    int idx = plane_offs[plane] + y * plane_strides[plane] + x;             );
-    GLSLC(1,    memoryBarrier();                                                        );
-    GLSLC(1,    float val = mod(float(inBuf[idx] + 128), 256.0) / 255.0;                );
-    GLSLC(1,    imageStore(out_img[plane], ivec2(x, y), vec4(val));                     );
-    GLSLC(1,    memoryBarrier();                                                        );
+    GLSLC(1,    ivec2 iSize = imageSize(out_img[plane]);                                );
+    GLSLC(1,    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);               );
+    GLSLC(1,    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);               );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    for (; y < uint(iSize.y); y += off_y) {                                 );
+    GLSLC(2,        int x = int(gl_GlobalInvocationID.x);                               );
+    GLSLC(2,        for (; x < uint(iSize.x); x += off_x) {                             );
+    GLSLC(3,            int idx = plane_offs[plane] + y * plane_strides[plane] + x;     );
+    GLSLC(3,            float val = mod(float(inBuf[idx] + 128), 256.0) / 255.0;        );
+    GLSLC(3,            imageStore(out_img[plane], ivec2(x, y), vec4(val));             );
+    GLSLC(3,            memoryBarrier();                                                );
+    GLSLC(2,        }                                                                   );
+    GLSLC(1,    }                                                                       );
     GLSLC(0, }                                                                          );
 
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
@@ -536,8 +542,8 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl);
 
     vk->CmdDispatch(exec->buf,
-                    ctx->plane[0].width >> 3,
-                    ctx->plane[0].height >> 3,
+                    ctx->plane[0].width >> 4,
+                    ctx->plane[0].height >> 4,
                     1);
 
     prev_nb_img_bar = *nb_img_bar;
@@ -1009,14 +1015,16 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCom
     GLSLD(haari_vert);
 
     GLSLC(0, void main() {                                                                  );
-    GLSLC(1,    uint y = gl_GlobalInvocationID.y;                                           );
-    GLSLC(1,    uint pic_z = gl_GlobalInvocationID.z;                                       );
     GLSLC(1,    uint off_y = gl_WorkGroupSize.y * gl_NumWorkGroups.y;                       );
     GLSLC(1,    uint off_x = gl_WorkGroupSize.x * gl_NumWorkGroups.x;                       );
-    GLSLC(1,    for (; y < uint(plane_sizes[pic_z].y); y += off_y) {                        );
-    GLSLC(2,        uint x = gl_GlobalInvocationID.x;                                       );
-    GLSLC(2,        for (; x < uint(plane_sizes[pic_z].x); x += off_x) {                    );
-    GLSLC(3,            idwt_vert(int(pic_z), int(x), int(y));                              );
+    GLSLC(1,                                                                                );
+    GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                   );
+    GLSLC(2,        uint y = gl_GlobalInvocationID.y;                                       );
+    GLSLC(2,        for (; y < uint(plane_sizes[pic_z].y); y += off_y) {                    );
+    GLSLC(3,            uint x = gl_GlobalInvocationID.x;                                   );
+    GLSLC(3,            for (; x < uint(plane_sizes[pic_z].x); x += off_x) {                );
+    GLSLC(4,                idwt_vert(int(pic_z), int(x), int(y));                          );
+    GLSLC(3,            }                                                                   );
     GLSLC(2,        }                                                                       );
     GLSLC(1,    }                                                                           );
     GLSLC(0, }                                                                              );
@@ -1049,7 +1057,7 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCo
     RET(ff_vk_shader_init(pl, shd, "haari_horiz", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
@@ -1089,14 +1097,16 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCo
     GLSLD(shift ? haari_shift_horiz : haari_horiz);
 
     GLSLC(0, void main() {                                                                  );
-    GLSLC(1,    uint y = gl_GlobalInvocationID.y;                                           );
-    GLSLC(1,    uint pic_z = gl_GlobalInvocationID.z;                                       );
     GLSLC(1,    uint off_y = gl_WorkGroupSize.y * gl_NumWorkGroups.y;                       );
     GLSLC(1,    uint off_x = gl_WorkGroupSize.x * gl_NumWorkGroups.x;                       );
-    GLSLC(1,    for (; y < uint(plane_sizes[pic_z].y); y += off_y) {                        );
-    GLSLC(2,        uint x = gl_GlobalInvocationID.x;                                       );
-    GLSLC(2,        for (; x < uint(plane_sizes[pic_z].x); x += off_x) {                    );
-    GLSLC(3,            idwt_horiz(int(pic_z), int(x), int(y));                             );
+    GLSLC(1,                                                                                );
+    GLSLC(1,    for (int pic_z = 0; pic_z < 3; pic_z++) {                                   );
+    GLSLC(2,        uint y = gl_GlobalInvocationID.y;                                       );
+    GLSLC(2,        for (; y < uint(plane_sizes[pic_z].y); y += off_y) {                    );
+    GLSLC(3,            uint x = gl_GlobalInvocationID.x;                                   );
+    GLSLC(3,            for (; x < uint(plane_sizes[pic_z].x); x += off_x) {                );
+    GLSLC(4,                idwt_horiz(int(pic_z), int(x), int(y));                         );
+    GLSLC(3,            }                                                                   );
     GLSLC(2,        }                                                                       );
     GLSLC(1,    }                                                                           );
     GLSLC(0, }                                                                              );
@@ -1142,61 +1152,29 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
         dec->pConst.real_plane_dims[4] = ctx->plane[2].idwt.width  >> i;
         dec->pConst.real_plane_dims[5] = ctx->plane[2].idwt.height >> i;
 
+        dec->pConst.plane_offs[0] = 0;
+        dec->pConst.plane_offs[1] = ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
+        dec->pConst.plane_offs[2] = 2 * dec->pConst.plane_offs[1];
+
+        dec->pConst.wavelet_depth = ctx->wavelet_depth;
+
         /* Vertical wavelet pass */
-        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
-        ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,
-                               VK_SHADER_STAGE_COMPUTE_BIT,
-                               0, sizeof(WaveletPushConst), &dec->pConst);
-
-        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
-                                          0, 0, 0,
-                                          dec->tmp_buf.address,
-                                          dec->tmp_buf.size,
-                                          VK_FORMAT_UNDEFINED);
-        if (err < 0)
-            goto fail;
-        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
-                                          0, 1, 0,
-                                          dec->tmp_interleave_buf.address,
-                                          dec->tmp_interleave_buf.size,
-                                          VK_FORMAT_UNDEFINED);
-        if (err < 0)
-            goto fail;
-
-        barrier_num = *nb_buf_bar;
-        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .pBufferMemoryBarriers = buf_bar + barrier_num,
-                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-        });
-
-        vk->CmdDispatch(exec->buf,
-                        dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 5,
-                        1);
-
-        /* Horizontal wavelet pass */
-        /*ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);*/
-        /*ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,*/
-        /*                    VK_SHADER_STAGE_COMPUTE_BIT,*/
-        /*                    0, sizeof(WaveletPushConst), &dec->pConst);*/
+        /*ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);*/
+        /*ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,*/
+        /*                       VK_SHADER_STAGE_COMPUTE_BIT,*/
+        /*                       0, sizeof(WaveletPushConst), &dec->pConst);*/
         /**/
-        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,*/
+        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
         /*                                  0, 0, 0,*/
-        /*                                  dec->tmp_interleave_buf.address,*/
-        /*                                  dec->tmp_interleave_buf.size,*/
+        /*                                  dec->tmp_buf.address,*/
+        /*                                  dec->tmp_buf.size,*/
         /*                                  VK_FORMAT_UNDEFINED);*/
         /*if (err < 0)*/
         /*    goto fail;*/
-        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,*/
+        /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
         /*                                  0, 1, 0,*/
-        /*                                  dec->tmp_buf.address,*/
-        /*                                  dec->tmp_buf.size,*/
+        /*                                  dec->tmp_interleave_buf.address,*/
+        /*                                  dec->tmp_interleave_buf.size,*/
         /*                                  VK_FORMAT_UNDEFINED);*/
         /*if (err < 0)*/
         /*    goto fail;*/
@@ -1214,21 +1192,47 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
         /*});*/
         /**/
         /*vk->CmdDispatch(exec->buf,*/
-        /*                dec->pConst.real_plane_dims[0] >> 5,*/
-        /*                dec->pConst.real_plane_dims[1] >> 4,*/
+        /*                dec->pConst.real_plane_dims[0] >> 4,*/
+        /*                dec->pConst.real_plane_dims[1] >> 5,*/
         /*                1);*/
-        /**/
-        /*barrier_num = *nb_buf_bar;*/
-        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
-        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
-        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
-        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
-        /**/
-        /*vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {*/
-        /*        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,*/
-        /*        .pBufferMemoryBarriers = buf_bar + barrier_num,*/
-        /*        .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,*/
-        /*});*/
+
+        /* Horizontal wavelet pass */
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(WaveletPushConst), &dec->pConst);
+
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                          0, 0, 0,
+                                          dec->tmp_interleave_buf.address,
+                                          dec->tmp_interleave_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+        err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                          0, 1, 0,
+                                          dec->tmp_buf.address,
+                                          dec->tmp_buf.size,
+                                          VK_FORMAT_UNDEFINED);
+        if (err < 0)
+            goto fail;
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0] >> 4,
+                        dec->pConst.real_plane_dims[1] >> 3,
+                        1);
     }
 
     return 0;
@@ -1655,7 +1659,7 @@ static void setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
         for (int level = ctx->wavelet_depth - 1; level >= 0; level--) {
             w >>= 1;
             s <<= 1;
-            for (int orient = 0; orient < 4; orient++) {
+            for (int orient = !!level; orient < 4; orient++) {
                 const int idx = plane * MAX_DWT_LEVELS * 4 + level * 4 + orient;
                 SubbandOffset *off = &offs[idx];
                 off->stride = s;
