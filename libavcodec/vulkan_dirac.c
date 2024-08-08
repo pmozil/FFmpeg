@@ -409,8 +409,8 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
           .name = "out_img",
           .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          /*.mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),*/
-          .mem_layout = "rgba32f",
+          .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
+          /*.mem_layout = "rgba32f",*/
           .mem_quali = "writeonly",
           .dimensions = 2,
           .elems = planes,
@@ -632,7 +632,7 @@ static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCo
     RET(ff_vk_shader_init(pl, shd, "legall_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 4, 4, 3);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
@@ -870,8 +870,8 @@ static av_always_inline int inline wavelet_legall_pass(DiracVulkanDecodeContext 
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf,
-                        dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4,
+                        dec->pConst.real_plane_dims[0] >> 2,
+                        dec->pConst.real_plane_dims[1] >> 3,
                         1);
 
         /* Horizontal wavelet pass */
@@ -968,17 +968,17 @@ static int init_wavelet_shd_dd97_vert(DiracVulkanDecodeContext *s, FFVkSPIRVComp
     uint8_t *spv_data;
     size_t spv_len;
     void *spv_opaque = NULL;
-    int wavelet_idx = DWT_DIRAC_DAUB9_7;
+    int wavelet_idx = DWT_DIRAC_DD9_7;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVulkanDescriptorSetBinding *desc;
     FFVkSPIRVShader *shd = &s->vert_wavelet_shd[wavelet_idx];
     FFVulkanPipeline *pl = &s->vert_wavelet_pl[wavelet_idx];
     FFVkExecPool *exec = &s->exec_pool;
 
-    RET(ff_vk_shader_init(pl, shd, "legall_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+    RET(ff_vk_shader_init(pl, shd, "dd97_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 4, 4, 3);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
@@ -1055,7 +1055,7 @@ static int init_wavelet_shd_dd97_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCom
     uint8_t *spv_data;
     size_t spv_len;
     void *spv_opaque = NULL;
-    int wavelet_idx = DWT_DIRAC_DAUB9_7;
+    int wavelet_idx = DWT_DIRAC_DD9_7;
     FFVulkanContext *vkctx = &s->vkctx;
     FFVulkanDescriptorSetBinding *desc;
     FFVkSPIRVShader *shd = &s->horiz_wavelet_shd[wavelet_idx];
@@ -1144,7 +1144,7 @@ static av_always_inline int inline wavelet_dd97_pass(DiracVulkanDecodeContext *d
                           int *nb_buf_bar) {
     int err;
     int barrier_num = *nb_buf_bar;
-    int wavelet_idx = DWT_DIRAC_DAUB9_7;
+    int wavelet_idx = DWT_DIRAC_DD9_7;
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
     FFVulkanPipeline *pl_hor = &dec->horiz_wavelet_pl[wavelet_idx];
@@ -1216,9 +1216,274 @@ static av_always_inline int inline wavelet_dd97_pass(DiracVulkanDecodeContext *d
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf,
-                        dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4,
+                        dec->pConst.real_plane_dims[0] >> 2,
+                        dec->pConst.real_plane_dims[1] >> 3,
                         1);
+
+        /* Horizontal wavelet pass */
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(WaveletPushConst), &dec->pConst);
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0] >> 4,
+                        dec->pConst.real_plane_dims[1] >> 3,
+                        1);
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+    }
+
+    return 0;
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
+}
+
+/* ----- Deslauriers-Dubuc(13, 7) init and pipeline pass ----- */
+static const char dd137_low[] = {
+    C(0, int32_t dd137_low(int32_t v0, int32_t v1, int32_t v2, int32_t v3, int32_t v4) {    )
+    C(0,    return v2 - ((9 * v1 + 9 * v3 - v4 - v0) >> 5);                                 )
+    C(0, }                                                                                  )
+};
+
+static const char dd137_low_x[] = {
+    C(0, int32_t dd137_low_x(int plane, int x, int y) {                     )
+    C(1,    const int w = plane_sizes[plane].x;                             )
+    C(1,    const int dw = w / 2;                                           )
+    C(1,                                                                    )
+    C(1,    const int x0 = (x > 1) ? x : dw;                                )
+    C(1,    const int32_t v0 = inBuf[getIdx(plane, x0, y)];                 )
+    C(1,                                                                    )
+    C(1,    const int x1 = (x > 1) ? (x + dw - 2) : dw;                     )
+    C(1,    const int32_t v1 = inBuf[getIdx(plane, x1, y)];                 )
+    C(1,                                                                    )
+    C(1,    const int x2 = x;                                               )
+    C(1,    const int32_t v2 = inBuf[getIdx(plane, x2, y)];                 )
+    C(1,                                                                    )
+    C(1,    const int x3 = x + dw;                                          )
+    C(1,    const int32_t v3 = inBuf[getIdx(plane, x3, y)];                 )
+    C(1,                                                                    )
+    C(1,    const int x4 = (x != dw - 1) ? (x + dw + 1) : (dw - 1);         )
+    C(1,    const int32_t v4 = inBuf[getIdx(plane, x4, y)];                 )
+    C(1,                                                                    )
+    C(1,    return dd137_low(v0, v1, v2, v3, v4);                           )
+    C(0, }                                                                  )
+};
+
+static const char dd137_horiz[] = {
+    C(0, void idwt_horiz(int plane, int x, int y) {                                         )
+    C(1,    const int w = plane_sizes[plane].x;                                             )
+    C(1,    const int dw = w / 2 - 1;                                                       )
+    C(1,                                                                                    )
+    C(1,    const int32_t out0 = dd137_low_x(plane, x, y);                                  )
+    C(1,                                                                                    )
+    C(1,    const int32_t out_1 = ((x - 1) > 0) ? dd137_low_x(plane, x - 1, y) : out0;      )
+    C(1,    const int32_t val3 = inBuf[getIdx(plane, x + dw + 1, y)];                       )
+    C(1,    const int32_t out1 = ((x + 1) <= dw) ? dd137_low_x(plane, x + 1, y) :           )
+    C(1,                                            dd137_low_x(plane, dw, y);              )
+    C(1,    const int32_t out2 = ((x + 2) <= dw) ? dd137_low_x(plane, x + 2, y) :           )
+    C(1,                                            dd137_low_x(plane, dw, y);              )
+    C(1,    const int32_t res  = dd97_high(out_1, out0, val3, out1, out2);                  )
+    C(1,                                                                                    )
+    C(1,    outBuf[getIdx(plane, 2 * x, y)]     = (out0 + 1) >> 1;                          )
+    C(1,    outBuf[getIdx(plane, 2 * x + 1, y)] = (res + 1) >> 1;                           )
+    C(0, }                                                                                  )
+};
+
+static int init_wavelet_shd_dd137_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    int wavelet_idx = DWT_DIRAC_DD13_7;
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->horiz_wavelet_shd[wavelet_idx];
+    FFVulkanPipeline *pl = &s->horiz_wavelet_pl[wavelet_idx];
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "dd137_horiz", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->horiz_wavelet_shd[wavelet_idx];
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+
+    GLSLC(0, #extension GL_EXT_debug_printf : enable);
+    GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
+    GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t inBuf[];",
+          .mem_quali = "readonly",
+          .dimensions = 1,
+        },
+        {
+          .name = "out_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t outBuf[];",
+          .mem_quali = "writeonly",
+          .dimensions = 1,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+
+    ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int plane_offs[3];                                 );
+    GLSLC(1,     int plane_strides[3];                              );
+    GLSLC(1,     int dw[3];                                         );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(get_idx);
+    GLSLD(dd97_high);
+    GLSLD(dd137_low);
+    GLSLD(dd137_low_x);
+    GLSLD(dd137_horiz);
+
+    GLSLC(0, void main() {                                                              );
+    GLSLC(1,    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);               );
+    GLSLC(1,    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);               );
+    GLSLC(1,    int pic_z = int(gl_GlobalInvocationID.z);                               );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    uint h = int(plane_sizes[pic_z].y);                                     );
+    GLSLC(2,    uint w = int(plane_sizes[pic_z].x);                                     );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
+    GLSLC(1,    for (; y < h; y += off_y) {                                             );
+    GLSLC(2,        int x = int(gl_GlobalInvocationID.x);                               );
+    GLSLC(2,        for (; 2 * x < w; x += off_x) {                                     );
+    GLSLC(3,            idwt_horiz(pic_z, x, y);                                        );
+    GLSLC(2,        }                                                                   );
+    GLSLC(1,    }                                                                       );
+    GLSLC(0, }                                                                          );
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
+static av_always_inline int inline wavelet_dd137_pass(DiracVulkanDecodeContext *dec,
+                          DiracContext *ctx,
+                          FFVkExecContext *exec,
+                          VkBufferMemoryBarrier2 *buf_bar,
+                          int *nb_buf_bar) {
+    int err;
+    int barrier_num = *nb_buf_bar;
+    int wavelet_idx = DWT_DIRAC_DD13_7;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+
+    FFVulkanPipeline *pl_hor = &dec->horiz_wavelet_pl[wavelet_idx];
+    /*FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];*/
+    /**/
+    /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
+    /*                                  0, 0, 0,*/
+    /*                                  dec->tmp_buf.address,*/
+    /*                                  dec->tmp_buf.size,*/
+    /*                                  VK_FORMAT_UNDEFINED);*/
+    /*if (err < 0)*/
+    /*    goto fail;*/
+    /*err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,*/
+    /*                                  0, 1, 0,*/
+    /*                                  dec->tmp_interleave_buf.address,*/
+    /*                                  dec->tmp_interleave_buf.size,*/
+    /*                                  VK_FORMAT_UNDEFINED);*/
+    /*if (err < 0)*/
+    /*    goto fail;*/
+
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                      0, 0, 0,
+                                      dec->tmp_interleave_buf.address,
+                                      dec->tmp_interleave_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                      0, 1, 0,
+                                      dec->tmp_buf.address,
+                                      dec->tmp_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+
+
+    for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
+        dec->pConst.plane_strides[0] = (ctx->plane[0].idwt.stride >> (1 + ctx->pshift)) << i;
+        dec->pConst.plane_strides[1] = (ctx->plane[1].idwt.stride >> (1 + ctx->pshift)) << i;
+        dec->pConst.plane_strides[2] = (ctx->plane[2].idwt.stride >> (1 + ctx->pshift)) << i;
+
+        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
+        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
+        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
+
+        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
+        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
+        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+
+        /* Vertical wavelet pass */
+        /*ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,*/
+        /*                       VK_SHADER_STAGE_COMPUTE_BIT,*/
+        /*                       0, sizeof(WaveletPushConst), &dec->pConst);*/
+        /**/
+        /*barrier_num = *nb_buf_bar;*/
+        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
+        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);*/
+        /*bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
+        /*bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);*/
+        /**/
+        /*vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {*/
+        /*        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,*/
+        /*        .pBufferMemoryBarriers = buf_bar + barrier_num,*/
+        /*        .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,*/
+        /*});*/
+        /**/
+        /*ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);*/
+        /*vk->CmdDispatch(exec->buf,*/
+        /*                dec->pConst.real_plane_dims[0] >> 2,*/
+        /*                dec->pConst.real_plane_dims[1] >> 3,*/
+        /*                1);*/
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -1323,7 +1588,7 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCom
     RET(ff_vk_shader_init(pl, shd, "haari_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 4, 4, 3);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
@@ -1579,8 +1844,8 @@ static av_always_inline int inline wavelet_haari_pass(DiracVulkanDecodeContext *
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf,
-                        dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 2,
+                        dec->pConst.real_plane_dims[0] >> 4,
+                        dec->pConst.real_plane_dims[1] >> 3,
                         1);
 
     }
@@ -1883,6 +2148,11 @@ static inline int wavelet_init(DiracVulkanDecodeContext *dec,
         return err;
     }
 
+    err = init_wavelet_shd_dd137_horiz(dec, spv);
+    if (err < 0) {
+        return err;
+    }
+
     return 0;
 }
 
@@ -2142,6 +2412,7 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     VkImageMemoryBarrier2 img_bar[80];
     DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
     FFVkExecContext *exec = ff_vk_exec_get(&dec->exec_pool);
+    enum dwt_type wavelet_idx = ctx->wavelet_idx + 2;
 
     ff_vk_exec_start(&dec->vkctx, exec);
 
@@ -2158,16 +2429,33 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     err = quant_pl_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
     if (err < 0)
         goto fail;
-
-    /*err = wavelet_haari_pass(dec, ctx, exec, buf_bar, &nb_buf_bar, 1);*/
-    /*if (err < 0)*/
-    /*    goto fail;*/
-
-    /*err = wavelet_legall_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);*/
-    /*if (err < 0)*/
-    /*    goto fail;*/
-
-    err = wavelet_dd97_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
+    /**/
+    /*switch (wavelet_idx) {*/
+    /*  case DWT_DIRAC_DD9_7:*/
+    /*    err = wavelet_dd97_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);*/
+    /*  break;*/
+    /**/
+    /*  case DWT_DIRAC_DD13_7:*/
+    /*    err = wavelet_dd137_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);*/
+    /*  break;*/
+    /**/
+    /*  case DWT_DIRAC_LEGALL5_3:*/
+    /*    err = wavelet_legall_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);*/
+    /*  break;*/
+    /**/
+    /*  case DWT_DIRAC_HAAR0:*/
+    /*    err = wavelet_haari_pass(dec, ctx, exec, buf_bar, &nb_buf_bar, 0);*/
+    /*  break;*/
+    /**/
+    /*  case DWT_DIRAC_HAAR1:*/
+    /*    err = wavelet_haari_pass(dec, ctx, exec, buf_bar, &nb_buf_bar, 1);*/
+    /*  break;*/
+    /**/
+    /*  default:*/
+    /*    err = AVERROR_INVALIDDATA;*/
+    /*  break;*/
+    /*}*/
+    err = wavelet_dd137_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
     if (err < 0)
         goto fail;
 
@@ -2176,7 +2464,6 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
-    // return ff_vk_exec_submit(&dec->vkctx, exec);
     err = ff_vk_exec_submit(&dec->vkctx, exec);
     if (err < 0)
         return err;
