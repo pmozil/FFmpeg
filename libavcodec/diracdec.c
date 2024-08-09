@@ -1767,12 +1767,12 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
     if (ret < 0)
         return ret;
 
-    /*if (avctx->hwaccel) {*/
-    /*    f->width   = s->plane[0].width;*/
-    /*    f->height  = s->plane[0].height;*/
-    /*    ret = ff_get_buffer(avctx, f, flags);*/
-    /*    return ret;*/
-    /*}*/
+    if (avctx->hwaccel) {
+        f->width   = s->plane[0].width;
+        f->height  = s->plane[0].height;
+        ret = ff_get_buffer(avctx, f, flags);
+        return ret;
+    }
 
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
