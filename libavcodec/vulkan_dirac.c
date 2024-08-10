@@ -521,8 +521,8 @@ static av_always_inline int inline cpy_to_image_pass(DiracVulkanDecodeContext *d
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl);
 
     vk->CmdDispatch(exec->buf,
-                    ctx->plane[0].width,
-                    ctx->plane[0].height,
+                    ctx->plane[0].width >> 3,
+                    ctx->plane[0].height >> 3,
                     1);
 
     return 0;
@@ -597,10 +597,10 @@ static const char legall_horiz[] = {
     C(1,    const int w = plane_sizes[plane].x;                                         )
     C(1,    const int dw = w / 2 - 1;                                                   )
     C(1,                                                                                )
-    C(1,    const int32_t out0 = legall_low_x(plane, x, y);                             )
-    C(1,    const int32_t tmp1 = (x == dw) ? out0 : legall_low_x(plane, x + 1, y);      )
+    C(1,    const int32_t out0 = legall_low_x(plane, x - 1, y);                         )
+    C(1,    const int32_t tmp1 = (x == dw) ? out0 : legall_low_x(plane, x, y);          )
     C(1,                                                                                )
-    C(1,    const int x1 = x + dw - 1;                                                  )
+    C(1,    const int x1 = x + dw;                                                      )
     C(1,    const int32_t val1 = inBuf[getIdx(plane, x1, y)];                           )
     C(1,                                                                                )
     C(1,    const int32_t out1 = legall_high(val1, out0, tmp1);                         )
@@ -890,19 +890,19 @@ static av_always_inline int inline wavelet_legall_pass(DiracVulkanDecodeContext 
                         dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3,
                         1);
-
-        barrier_num = *nb_buf_bar;
-        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .pBufferMemoryBarriers = buf_bar + barrier_num,
-                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-        });
     }
+
+    barrier_num = *nb_buf_bar;
+    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pBufferMemoryBarriers = buf_bar + barrier_num,
+            .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+    });
 
     return 0;
 fail:
