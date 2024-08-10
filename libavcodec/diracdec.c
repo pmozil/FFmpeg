@@ -1652,7 +1652,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
 {
     DWTContext d;
     int y, i, comp, dsty;
-    int ret;
+    int ret = -1;
 
     if (s->avctx->hwaccel) {
         ret = FF_HW_CALL(s->avctx, start_frame, NULL, 0);
@@ -1676,7 +1676,11 @@ static int dirac_decode_frame_internal(DiracContext *s)
 
     if (s->avctx->hwaccel) {
         ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
-        return ret;
+        if (ret == 0) {
+            /* Hwaccel failed - fall back on software decoder */
+            return ret;
+        }
+        ret = 0;
     }
 
     for (comp = 0; comp < 3; comp++) {
