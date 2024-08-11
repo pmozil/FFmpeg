@@ -1680,7 +1680,6 @@ static int dirac_decode_frame_internal(DiracContext *s)
             /* Hwaccel failed - fall back on software decoder */
             return ret;
         }
-        ret = 0;
     }
 
     for (comp = 0; comp < 3; comp++) {
@@ -1977,15 +1976,18 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         s->pshift = s->bit_depth > 8;
 
-        pix_fmts = (enum AVPixelFormat[]){
+        if (s->pshift) {
+            avctx->pix_fmt = s->sof_pix_fmt;
+        } else {
+            pix_fmts = (enum AVPixelFormat[]){
 #if CONFIG_DIRAC_VULKAN_HWACCEL
-            AV_PIX_FMT_VULKAN,
+                AV_PIX_FMT_VULKAN,
 #endif
-            s->sof_pix_fmt,
-            AV_PIX_FMT_NONE,
-        };
-
-        avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
+                s->sof_pix_fmt,
+                AV_PIX_FMT_NONE,
+            };
+            avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
+        }
 
         ret = av_pix_fmt_get_chroma_sub_sample(s->sof_pix_fmt,
                                                &s->chroma_x_shift,
