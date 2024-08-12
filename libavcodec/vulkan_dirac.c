@@ -413,9 +413,8 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
           .name = "out_img",
           .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          .mem_layout = ff_vk_shader_rep_fmt(s->vkctx.output_format),
-          /*.mem_layout = "rgba32f",*/
-          .mem_quali = "writeonly",
+          /*.mem_quali = "writeonly",*/
+          .mem_layout = "rgba16f",
           .dimensions = 2,
           .elems = planes,
         },
@@ -440,14 +439,14 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
     GLSLC(1,    if (!IS_WITHIN(ivec2(x, y), imageSize(out_img[plane]))) return;         );
     GLSLC(1,    int idx = plane_offs[plane] + y * plane_strides[plane] + x;             );
     if (idx == 2) {
-        GLSLC(1,    int32_t ival = (inBuf[idx] + 2048);                                 );
-        GLSLC(1,    float val = float(clamp(ival, 0, 4095)) / 4095.0;                   );
+        GLSLC(1,    int32_t ival = inBuf[idx] + 2048;                                   );
+        GLSLC(1,    float32_t val = float32_t(clamp(ival, 0, 4095)) / 4095.0;           );
     } else if (idx == 1) {
-        GLSLC(1,    int32_t ival = (inBuf[idx] + 512);                                  );
-        GLSLC(1,    float val = float(clamp(ival, 0, 1023)) / 1023.0;                   );
+        GLSLC(1,    int32_t ival = inBuf[idx] + 512;                                    );
+        GLSLC(1,    float32_t val = float32_t(clamp(ival, 0, 1023)) / 1023.0;           );
     } else {
-        GLSLC(1,    int32_t ival = (inBuf[idx] + 128);                                  );
-        GLSLC(1,    float val = float(clamp(ival, 0, 255)) / 255.0;                     );
+        GLSLC(1,    int32_t ival = inBuf[idx] + 128;                                    );
+        GLSLC(1,    float32_t val = float32_t(clamp(ival, 0, 255)) / 255.0;             );
     }
     GLSLC(1,    imageStore(out_img[plane], ivec2(x, y), vec4(val));                     );
     GLSLC(0, }                                                                          );
