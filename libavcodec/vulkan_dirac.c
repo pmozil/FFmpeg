@@ -919,6 +919,440 @@ fail:
     return err;
 }
 
+/* ----- Fidelity init and pipeline pass ----- */
+
+static const char fidelity_low[] = {
+      C(0, int32_t fidelity_low(int32_t v0, int32_t v1, int32_t v2, int32_t v3, int32_t v4, int32_t v5, int32_t v6, int32_t v7) {)
+      C(1,      return  (-2 * v0 + 10 * v1 - 25 * v2 + 81 * v3 + 81 * v4 - 25 * v5 + 10 * v6 - 2 * v7 + 128) >> 8;)
+      C(0, }                                                                                )
+};
+
+static const char fidelity_high[] = {
+      C(0, int32_t fidelity_high(int32_t v0, int32_t v1, int32_t v2, int32_t v3, int32_t v4, int32_t v5, int32_t v6, int32_t v7) {)
+      C(1,      return  (-8 * v0 + 21 * v1 - 46 * v2 + 161 * v3 + 161 * v4 - 46 * v5 + 21 * v6 - 8 * v7 + 128) >> 8;)
+      C(0, }                                                                                )
+};
+
+static const char fidelity_low_y[] = {
+    C(0, int32_t fidelity_low_y(int plane, int x, int y) {                  )
+    C(1,    const int h = plane_sizes[plane].y;                             )
+    C(1,                                                                    )
+    C(1,    const int32_t v1 = inBuf[getIdx(plane, x, y + 1)];              )
+    C(1,                                                                    )
+    C(1,    const int y_6 = ((y - 6) > 0) ? (y - 6) : 0;                    )
+    C(1,    const int32_t v_6 = inBuf[getIdx(plane, x, y_6)];               )
+    C(1,                                                                    )
+    C(1,    const int y_4 = ((y - 4) > 0) ? (y - 4) : 0;                    )
+    C(1,    const int32_t v_4 = inBuf[getIdx(plane, x, y_4)];               )
+    C(1,                                                                    )
+    C(1,    const int y_2 = ((y - 2) > 0) ? (y - 2) : 0;                    )
+    C(1,    const int32_t v_2 = inBuf[getIdx(plane, x, y_2)];               )
+    C(1,                                                                    )
+    C(1,    const int32_t v0 = inBuf[getIdx(plane, x, y)];                  )
+    C(1,                                                                    )
+    C(1,    const int y2 = ((y + 2) < h) ? (y + 2) : (h - 2);               )
+    C(1,    const int32_t v2 = inBuf[getIdx(plane, x, y2)];                 )
+    C(1,                                                                    )
+    C(1,    const int y4 = ((y + 4) < h) ? (y + 4) : (h - 2);               )
+    C(1,    const int32_t v4 = inBuf[getIdx(plane, x, y4)];                 )
+    C(1,                                                                    )
+    C(1,    const int y6 = ((y + 6) < h) ? (y + 6) : (h - 2);               )
+    C(1,    const int32_t v6 = inBuf[getIdx(plane, x, y6)];                 )
+    C(1,                                                                    )
+    C(1,    const int y8 = ((y + 8) < h) ? (y + 8) : (h - 2);               )
+    C(1,    const int32_t v8 = inBuf[getIdx(plane, x, y8)];                 )
+    C(1,                                                                    )
+    C(1,    return v1 + fidelity_low(v_6, v_4, v_2, v0, v2, v4, v6, v8);    )
+    C(0, }                                                                  )
+};
+
+static const char fidelity_vert[] = {
+    C(0, void idwt_vert(int plane, int x, int y) {                                              )
+    C(1,    const int h = plane_sizes[plane].y;                                                 )
+    C(1,                                                                                        )
+    C(1,    const int32_t v0 = inBuf[getIdx(plane, x, y)];                                      )
+    C(1,    const int32_t v1 = fidelity_low_y(plane, x, y);                                     )
+    C(1,    const int32_t v_7 = (y - 8 > 0) ? fidelity_low_y(plane, x, y - 8) : v1;             )
+    C(1,    const int32_t v_5 = (y - 6 > 0) ? fidelity_low_y(plane, x, y - 6) : v1;             )
+    C(1,    const int32_t v_3 = (y - 4 > 0) ? fidelity_low_y(plane, x, y - 4) : v1;             )
+    C(1,    const int32_t v_1 = (y - 2 > 0) ? fidelity_low_y(plane, x, y - 2) : v1;             )
+    C(1,    const int32_t v3  = (y + 2 < h) ? fidelity_low_y(plane, x, y + 2) :                 )
+    C(1,                                        fidelity_low_y(plane, x, h - 2);                )
+    C(1,    const int32_t v5  = (y + 4 < h) ? fidelity_low_y(plane, x, y + 4) :                 )
+    C(1,                                        fidelity_low_y(plane, x, h - 2);                )
+    C(1,    const int32_t v7  = (y + 6 < h) ? fidelity_low_y(plane, x, y + 6) :                 )
+    C(1,                                        fidelity_low_y(plane, x, h - 2);                )
+    C(1,    outBuf[getIdx(plane, x, y)] = v0 - fidelity_high(v_7, v_5, v_3, v_1, v1, v3, v5, v7);)
+    C(1,    outBuf[getIdx(plane, x, y + 1)] = v1;                                               )
+    C(0, }                                                                                      )
+};
+
+static const char fidelity_low_x[] = {
+    C(0, int32_t fidelity_low_x(int plane, int x, int y) {                  )
+    C(1,    const int w = plane_sizes[plane].x;                             )
+    C(1,    const int dw = w / 2 - 1;                                       )
+    C(1,                                                                    )
+    C(1,    const int x_3 = clamp(x - 3, 0, dw);                            )
+    C(1,    const int v_3 = inBuf[getIdx(plane, x_3, y)];                   )
+    C(1,                                                                    )
+    C(1,    const int x_2 = clamp(x - 2, 0, dw);                            )
+    C(1,    const int v_2 = inBuf[getIdx(plane, x_2, y)];                   )
+    C(1,                                                                    )
+    C(1,    const int x_1 = clamp(x - 1, 0, dw);                            )
+    C(1,    const int v_1 = inBuf[getIdx(plane, x_1, y)];                   )
+    C(1,                                                                    )
+    C(1,    const int v0 = inBuf[getIdx(plane, x, y)];                      )
+    C(1,                                                                    )
+    C(1,    const int x_w = x + dw;                                         )
+    C(1,    const int v_w = inBuf[getIdx(plane, x_w, y)];                   )
+    C(1,                                                                    )
+    C(1,    const int x1 = clamp(x + 1, 0, dw);                             )
+    C(1,    const int v1 = inBuf[getIdx(plane, x1, y)];                     )
+    C(1,                                                                    )
+    C(1,    const int x2 = clamp(x + 2, 0, dw);                             )
+    C(1,    const int v2 = inBuf[getIdx(plane, x2, y)];                     )
+    C(1,                                                                    )
+    C(1,    const int x3 = clamp(x + 3, 0, dw);                             )
+    C(1,    const int v3 = inBuf[getIdx(plane, x3, y)];                     )
+    C(1,                                                                    )
+    C(1,    const int x4 = clamp(x + 4, 0, dw);                             )
+    C(1,    const int v4 = inBuf[getIdx(plane, x4, y)];                     )
+    C(1,                                                                    )
+    C(1,    return v_w + fidelity_low(v_3, v_2, v_1, v0, v1, v2, v3, v4);   )
+    C(0, }                                                                  )
+};
+
+static const char fidelity_horiz[] = {
+    C(0, void idwt_horiz(int plane, int x, int y) {                                             )
+    C(1,    const int w = plane_sizes[plane].x;                                                 )
+    C(1,    const int dw = w / 2 - 1;                                                           )
+    C(1,                                                                                        )
+    C(1,    const int32_t vo0 = inBuf[getIdx(plane, x, y)];                                     )
+    C(1,                                                                                        )
+    C(1,    const int x_4 = clamp(x - 4, 0, dw);                                                )
+    C(1,    const int32_t v_4 = fidelity_low_x(plane, x_4, y);                                  )
+    C(1,    const int x_3 = clamp(x - 3, 0, dw);                                                )
+    C(1,    const int32_t v_3 = fidelity_low_x(plane, x_3, y);                                  )
+    C(1,    const int x_2 = clamp(x - 2, 0, dw);                                                )
+    C(1,    const int32_t v_2 = fidelity_low_x(plane, x_2, y);                                  )
+    C(1,    const int x_1 = clamp(x - 1, 0, dw);                                                )
+    C(1,    const int32_t v_1 = fidelity_low_x(plane, x_1, y);                                  )
+    C(1,    const int x0 = clamp(x, 0, dw);                                                     )
+    C(1,    const int32_t v0 = fidelity_low_x(plane, x0, y);                                    )
+    C(1,    const int x1 = clamp(x + 1, 0, dw);                                                 )
+    C(1,    const int32_t v1 = fidelity_low_x(plane, x1, y);                                    )
+    C(1,    const int x2 = clamp(x + 2, 0, dw);                                                 )
+    C(1,    const int32_t v2 = fidelity_low_x(plane, x2, y);                                    )
+    C(1,    const int x3 = clamp(x + 3, 0, dw);                                                 )
+    C(1,    const int32_t v3 = fidelity_low_x(plane, x3, y);                                    )
+    C(1,                                                                                        )
+    C(1,    outBuf[getIdx(plane, 2 * x, y)] = vo0 - fidelity_high(v_4, v_3, v_2, v_1, v0, v1, v2, v3);)
+    C(1,    outBuf[getIdx(plane, 2 * x + 1, y)] = v0;                                           )
+    C(0, }                                                                                      )
+};
+
+static int init_wavelet_shd_fidelity_vert(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    int wavelet_idx = DWT_DIRAC_FIDELITY;
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->vert_wavelet_shd[wavelet_idx];
+    FFVulkanPipeline *pl = &s->vert_wavelet_pl[wavelet_idx];
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "fidelity_vert", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->vert_wavelet_shd[wavelet_idx];
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+
+    GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
+    GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t inBuf[];",
+          .mem_quali = "readonly",
+          .dimensions = 1,
+        },
+        {
+          .name = "out_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t outBuf[];",
+          .mem_quali = "writeonly",
+          .dimensions = 1,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+
+    ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int plane_offs[3];                                 );
+    GLSLC(1,     int plane_strides[3];                              );
+    GLSLC(1,     int dw[3];                                         );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(get_idx);
+    GLSLD(fidelity_low);
+    GLSLD(fidelity_high);
+    GLSLD(fidelity_low_y);
+    GLSLD(fidelity_vert);
+
+    GLSLC(0, void main() {                                                              );
+    GLSLC(1,    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);               );
+    GLSLC(1,    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);               );
+    GLSLC(1,    int pic_z = int(gl_GlobalInvocationID.z);                               );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    uint h = int(plane_sizes[pic_z].y);                                     );
+    GLSLC(2,    uint w = int(plane_sizes[pic_z].x);                                     );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
+    GLSLC(1,    for (; 2 * y < h; y += off_y) {                                         );
+    GLSLC(2,        int x = int(gl_GlobalInvocationID.x);                               );
+    GLSLC(2,        for (; x < w; x += off_x) {                                         );
+    GLSLC(3,            idwt_vert(pic_z, x, 2 * y);                                     );
+    GLSLC(2,        }                                                                   );
+    GLSLC(1,    }                                                                       );
+    GLSLC(0, }                                                                          );
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
+static int init_wavelet_shd_fidelity_horiz(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
+{
+    int err = 0;
+    uint8_t *spv_data;
+    size_t spv_len;
+    void *spv_opaque = NULL;
+    int wavelet_idx = DWT_DIRAC_FIDELITY;
+    FFVulkanContext *vkctx = &s->vkctx;
+    FFVulkanDescriptorSetBinding *desc;
+    FFVkSPIRVShader *shd = &s->horiz_wavelet_shd[wavelet_idx];
+    FFVulkanPipeline *pl = &s->horiz_wavelet_pl[wavelet_idx];
+    FFVkExecPool *exec = &s->exec_pool;
+
+    RET(ff_vk_shader_init(pl, shd, "fidelity_horiz", VK_SHADER_STAGE_COMPUTE_BIT, 0));
+
+    shd = &s->horiz_wavelet_shd[wavelet_idx];
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+
+    GLSLC(0, #extension GL_EXT_debug_printf : enable);
+    GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
+    GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
+
+    desc = (FFVulkanDescriptorSetBinding[])
+    {
+        {
+          .name = "in_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t inBuf[];",
+          .mem_quali = "readonly",
+          .dimensions = 1,
+        },
+        {
+          .name = "out_buf",
+          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .buf_content = "int32_t outBuf[];",
+          .mem_quali = "writeonly",
+          .dimensions = 1,
+        },
+    };
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
+
+    ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    GLSLC(0, layout(push_constant, std430) uniform pushConstants {  );
+    GLSLC(1,     ivec2 plane_sizes[3];                              );
+    GLSLC(1,     int plane_offs[3];                                 );
+    GLSLC(1,     int plane_strides[3];                              );
+    GLSLC(1,     int dw[3];                                         );
+    GLSLC(1,     int wavelet_depth;                                 );
+    GLSLC(0, };                                                     );
+    GLSLC(0,                                                        );
+
+    GLSLD(get_idx);
+    GLSLD(fidelity_low);
+    GLSLD(fidelity_high);
+    GLSLD(fidelity_low_x);
+    GLSLD(fidelity_horiz);
+
+    GLSLC(0, void main() {                                                              );
+    GLSLC(1,    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);               );
+    GLSLC(1,    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);               );
+    GLSLC(1,    int pic_z = int(gl_GlobalInvocationID.z);                               );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    uint h = int(plane_sizes[pic_z].y);                                     );
+    GLSLC(2,    uint w = int(plane_sizes[pic_z].x);                                     );
+    GLSLC(1,                                                                            );
+    GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
+    GLSLC(1,    for (; y < h; y += off_y) {                                             );
+    GLSLC(2,        int x = int(gl_GlobalInvocationID.x);                               );
+    GLSLC(2,        for (; 2 * x < w; x += off_x) {                                     );
+    GLSLC(3,            idwt_horiz(pic_z, x, y);                                        );
+    GLSLC(2,        }                                                                   );
+    GLSLC(1,    }                                                                       );
+    GLSLC(0, }                                                                          );
+
+    RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
+    RET(ff_vk_shader_create(vkctx, shd, spv_data, spv_len, "main"));
+    RET(ff_vk_init_compute_pipeline(vkctx, pl, shd));
+    RET(ff_vk_exec_pipeline_register(vkctx, exec, pl));
+
+fail:
+    if (spv_opaque)
+        spv->free_shader(spv, &spv_opaque);
+
+    return err;
+}
+
+static av_always_inline int inline wavelet_fidelity_pass(DiracVulkanDecodeContext *dec,
+                          DiracContext *ctx,
+                          FFVkExecContext *exec,
+                          VkBufferMemoryBarrier2 *buf_bar,
+                          int *nb_buf_bar) {
+    int err;
+    int barrier_num = *nb_buf_bar;
+    int wavelet_idx = DWT_DIRAC_FIDELITY;
+    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
+
+    FFVulkanPipeline *pl_hor = &dec->horiz_wavelet_pl[wavelet_idx];
+    FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
+
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
+                                      0, 0, 0,
+                                      dec->tmp_buf.address,
+                                      dec->tmp_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec,
+                                      0, 1, 0,
+                                      dec->tmp_interleave_buf.address,
+                                      dec->tmp_interleave_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                      0, 0, 0,
+                                      dec->tmp_interleave_buf.address,
+                                      dec->tmp_interleave_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+    err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec,
+                                      0, 1, 0,
+                                      dec->tmp_buf.address,
+                                      dec->tmp_buf.size,
+                                      VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        goto fail;
+
+
+    for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
+        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
+        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
+        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
+
+        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
+        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
+        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
+
+        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
+        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
+        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width)  >> i;
+        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+
+        /* Vertical wavelet pass */
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_vert,
+                               VK_SHADER_STAGE_COMPUTE_BIT,
+                               0, sizeof(WaveletPushConst), &dec->pConst);
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0] >> 3,
+                        dec->pConst.real_plane_dims[1] >> 4,
+                        1);
+
+        /* Horizontal wavelet pass */
+        ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(WaveletPushConst), &dec->pConst);
+
+        barrier_num = *nb_buf_bar;
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+        bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+        bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+        vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .pBufferMemoryBarriers = buf_bar + barrier_num,
+                .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+        });
+
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
+        vk->CmdDispatch(exec->buf,
+                        dec->pConst.real_plane_dims[0] >> 4,
+                        dec->pConst.real_plane_dims[1] >> 3,
+                        1);
+    }
+
+    barrier_num = *nb_buf_bar;
+    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
+    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
+    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
+
+    vk->CmdPipelineBarrier2(exec->buf, &(VkDependencyInfo) {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pBufferMemoryBarriers = buf_bar + barrier_num,
+            .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
+    });
+
+    return 0;
+fail:
+    ff_vk_exec_discard_deps(&dec->vkctx, exec);
+    return err;
+}
+
 /* ----- Deslauriers-Dubuc(9, 7) init and pipeline pass ----- */
 
 static const char dd97_high[] = {
@@ -2280,6 +2714,16 @@ static inline int wavelet_init(DiracVulkanDecodeContext *dec,
         return err;
     }
 
+    err = init_wavelet_shd_fidelity_vert(dec, spv);
+    if (err < 0) {
+        return err;
+    }
+
+    err = init_wavelet_shd_fidelity_horiz(dec, spv);
+    if (err < 0) {
+        return err;
+    }
+
     err = init_wavelet_shd_dd137_vert(dec, spv);
     if (err < 0) {
         return err;
@@ -2576,6 +3020,10 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
         goto fail;
 
     switch (wavelet_idx) {
+      case DWT_DIRAC_FIDELITY:
+        err = wavelet_fidelity_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
+      break;
+
       case DWT_DIRAC_DD9_7:
         err = wavelet_dd97_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
       break;
@@ -2600,8 +3048,6 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
         err = AVERROR_PATCHWELCOME;
       break;
     }
-    if (err < 0)
-        goto fail;
 
     err = cpy_to_image_pass(dec, ctx, exec, views,
                             buf_bar, &nb_buf_bar, img_bar, &nb_img_bar,
@@ -2609,13 +3055,11 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
-    err = ff_vk_exec_submit(&dec->vkctx, exec);
-    if (err < 0)
-        return err;
+    return ff_vk_exec_submit(&dec->vkctx, exec);
+    /*if (err < 0)*/
+    /*    return err;*/
 
-    ff_vk_exec_wait(&dec->vkctx, exec);
-
-    return 0;
+    /*ff_vk_exec_wait(&dec->vkctx, exec);*/
 
 fail:
     ff_vk_exec_discard_deps(&dec->vkctx, exec);
@@ -2716,7 +3160,10 @@ static int vulkan_dirac_decode_slice(AVCodecContext *avctx,
 {
     DiracContext *s = avctx->priv_data;
 
-    avctx->execute2(avctx, decode_hq_slice_row, NULL, NULL, s->num_y);
+    /*avctx->execute2(avctx, decode_hq_slice_row, NULL, NULL, s->num_y);*/
+    for (int i = 0; i < s->num_y; i++) {
+        decode_hq_slice_row(avctx, NULL, i, 0);
+    }
 
     return 0;
 }
