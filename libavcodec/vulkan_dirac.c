@@ -1002,7 +1002,7 @@ static const char fidelity_low_x[] = {
     C(1,                                                                    )
     C(1,    const int v0 = inBuf[getIdx(plane, x, y)];                      )
     C(1,                                                                    )
-    C(1,    const int x_w = x + dw;                                         )
+    C(1,    const int x_w = x + dw + 1;                                     )
     C(1,    const int v_w = inBuf[getIdx(plane, x_w, y)];                   )
     C(1,                                                                    )
     C(1,    const int x1 = clamp(x + 1, 0, dw);                             )
