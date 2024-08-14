@@ -401,8 +401,8 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
           .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           .mem_quali = "writeonly",
-          /*.mem_layout  = ff_vk_shader_rep_fmt(vkctx->output_format),*/
-          .mem_layout  = "rgba32f",
+          .mem_layout  = ff_vk_shader_rep_fmt(vkctx->output_format),
+          /*.mem_layout  = "rgba32f",*/
           .dimensions = 2,
           .elems = planes,
         },
@@ -428,10 +428,10 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
     GLSLC(1,    int idx = plane_offs[plane] + y * plane_strides[plane] + x;             );
     if (idx == 2) {
         GLSLC(1,    int32_t ival = inBuf[idx] + 2048;                                   );
-        GLSLC(1,    float val = float(clamp(ival, 0, 4096)) / 65536.0;           );
+        GLSLC(1,    float val = float(clamp(ival, 0, 4096)) / 65535.0;           );
     } else if (idx == 1) {
         GLSLC(1,    int32_t ival = inBuf[idx] + 512;                                    );
-        GLSLC(1,    float val = float(clamp(ival, 0, 1024)) / 65536.0;           );
+        GLSLC(1,    float val = float(clamp(ival, 0, 1024)) / 65535.0;           );
     } else {
         GLSLC(1,    int32_t ival = inBuf[idx] + 128;                                    );
         GLSLC(1,    float val = float(clamp(ival, 0, 256)) / 256.0;             );
@@ -1350,7 +1350,7 @@ static const char daub97_low1[] = {
 
 static const char daub97_high1[] = {
       C(0, int32_t daub97_high1(int32_t v1, int32_t v2, int32_t v3) {   )
-      C(1,      return  v2 - ((3616 * (v1 + v2) + 2048) >> 12);             )
+      C(1,      return  v2 - ((113 * (v1 + v2) + 64) >> 7);             )
       C(0, }                                                            )
 };
 
@@ -2858,7 +2858,7 @@ static const char proc_slice[] = {
     C(0, void proc_slice(int slice_idx) {                                                   )
     C(1,    const int plane = int(gl_GlobalInvocationID.x);                                 )
     C(1,    const int level = int(gl_GlobalInvocationID.y);                                 )
-    C(1,    if (level >= wavelet_depth) return;                                             )
+    /*C(1,    if (level >= wavelet_depth) return;                                             )*/
     C(1,    const int base_idx = slice_idx * DWT_LEVELS * 8;                                )
     C(1,    const int base_slice_idx = slice_idx * DWT_LEVELS * 3 + plane * DWT_LEVELS;     )
     C(1,                                                                                    )
@@ -2905,7 +2905,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     RET(ff_vk_shader_init(pl, shd, "dequant", VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->quant_shd;
-    ff_vk_shader_set_compute_sizes(shd, 3, MAX_DWT_LEVELS, 1);
+    ff_vk_shader_set_compute_sizes(shd, 3, 1, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
@@ -3066,7 +3066,7 @@ static av_always_inline int inline quant_pl_pass(DiracVulkanDecodeContext *dec,
             .bufferMemoryBarrierCount = *nb_buf_bar,
         });
 
-    vk->CmdDispatch(exec->buf, 1, 1, ctx->num_x * ctx->num_y);
+    vk->CmdDispatch(exec->buf, 1, ctx->wavelet_depth, ctx->num_x * ctx->num_y);
 
     return 0;
 }
