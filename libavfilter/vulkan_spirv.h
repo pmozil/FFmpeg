@@ -19,27 +19,6 @@
 #ifndef AVFILTER_VULKAN_SPIRV_H
 #define AVFILTER_VULKAN_SPIRV_H
 
-#include "libavutil/vulkan.h"
+#include "libavutil/vulkan_spirv.h"
 
-#include "vulkan.h"
-#include "config.h"
-
-typedef struct FFVkSPIRVCompiler {
-    void *priv;
-    int (*compile_shader)(struct FFVkSPIRVCompiler *ctx, void *avctx,
-                          struct FFVkSPIRVShader *shd, uint8_t **data,
-                          size_t *size, const char *entrypoint, void **opaque);
-    void (*free_shader)(struct FFVkSPIRVCompiler *ctx, void **opaque);
-    void (*uninit)(struct FFVkSPIRVCompiler **ctx);
-} FFVkSPIRVCompiler;
-
-#if CONFIG_LIBGLSLANG
-FFVkSPIRVCompiler *ff_vk_glslang_init(void);
-#define ff_vk_spirv_init ff_vk_glslang_init
 #endif
-#if CONFIG_LIBSHADERC
-FFVkSPIRVCompiler *ff_vk_shaderc_init(void);
-#define ff_vk_spirv_init ff_vk_shaderc_init
-#endif
-
-#endif /* AVFILTER_VULKAN_H */

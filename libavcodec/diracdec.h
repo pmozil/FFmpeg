@@ -1,8 +1,4 @@
 /*
- * Copyright (C) 2007 Marco Gerards <marco@gnu.org>
- * Copyright (C) 2009 David Conrad
- * Copyright (C) 2011 Jordi Ortiz
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -22,13 +18,13 @@
 
 /**
  * @file
- * Dirac Decoder
+ * Dirac Decoder Header
  * @author Marco Gerards <marco@gnu.org>, David Conrad, Jordi Ortiz <nenjordi@gmail.com>
  */
 
 
-#ifndef DIRACDEC_H
-#define DIRACDEC_H
+#ifndef AVCODEC_DIRACDEC_H
+#define AVCODEC_DIRACDEC_H
 
 #include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
