@@ -164,9 +164,9 @@ static av_always_inline inline void bar_read(VkBufferMemoryBarrier2 *buf_bar,
                                                 FFVkBuffer *buf) {
     buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
         .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -181,9 +181,9 @@ static av_always_inline inline void bar_write(VkBufferMemoryBarrier2 *buf_bar,
                                                 FFVkBuffer *buf) {
     buf_bar[(*nb_buf_bar)++] = (VkBufferMemoryBarrier2) {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -271,14 +271,6 @@ static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     if (err < 0)
         return err;
 
-    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 2, 0,
-                                    dec->slice_buf->address,
-                                    dec->slice_buf->size,
-                                    VK_FORMAT_UNDEFINED);
-    if (err < 0)
-        return err;
-
     return 0;
 }
 
@@ -296,14 +288,6 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
                                 (void **)&dec->quant_buf_vk_ptr,
                                 &dec->av_quant_buf,
                                 &dec->quant_buf);
-    if (err < 0)
-        return err;
-
-    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 1, 0,
-                                    dec->quant_buf->address,
-                                    dec->quant_buf->size,
-                                    VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
@@ -350,14 +334,6 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     if (err < 0)
         return err;
 
-    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 0, 0,
-                                    dec->quant_val_buf->address,
-                                    dec->quant_val_buf->size,
-                                    VK_FORMAT_UNDEFINED);
-    if (err < 0)
-        return err;
-
     return 0;
 }
 
@@ -392,7 +368,6 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
           .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
           .buf_content = "int32_t inBuf[];",
-          .mem_layout = "std430",
           .mem_quali = "readonly",
           .dimensions = 1,
         },
@@ -401,8 +376,8 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
           .stages = VK_SHADER_STAGE_COMPUTE_BIT,
           .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           .mem_quali = "writeonly",
-          .mem_layout  = ff_vk_shader_rep_fmt(vkctx->output_format),
-          /*.mem_layout  = "rgba32f",*/
+          // .mem_layout  = ff_vk_shader_rep_fmt(vkctx->output_format),
+          .mem_layout  = "rgba32f",
           .dimensions = 2,
           .elems = planes,
         },
@@ -424,19 +399,19 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv, int
     GLSLC(1,    int x = int(gl_GlobalInvocationID.x);                                   );
     GLSLC(1,    int y = int(gl_GlobalInvocationID.y);                                   );
     GLSLC(1,    int plane = int(gl_GlobalInvocationID.z);                               );
-    GLSLC(1,    if (!IS_WITHIN(ivec2(x, y), imageSize(out_img[plane]))) return;         );
     GLSLC(1,    int idx = plane_offs[plane] + y * plane_strides[plane] + x;             );
     if (idx == 2) {
-        GLSLC(1,    int32_t ival = inBuf[idx] + 2048;                                   );
+        GLSLC(1,    int32_t ival = inBuf[idx] + 2048;                                    );
         GLSLC(1,    float val = float(clamp(ival, 0, 4096)) / 65535.0;           );
     } else if (idx == 1) {
         GLSLC(1,    int32_t ival = inBuf[idx] + 512;                                    );
         GLSLC(1,    float val = float(clamp(ival, 0, 1024)) / 65535.0;           );
     } else {
         GLSLC(1,    int32_t ival = inBuf[idx] + 128;                                    );
-        GLSLC(1,    float val = float(clamp(ival, 0, 256)) / 256.0;             );
+        GLSLC(1,    float val = float(clamp(ival, 0, 256)) / 255.0;             );
     }
     GLSLC(1,    imageStore(out_img[plane], ivec2(x, y), vec4(val));                     );
+    GLSLC(1,    memoryBarrier(););
     GLSLC(0, }                                                                          );
 
     RET(spv->compile_shader(spv, vkctx, shd, &spv_data, &spv_len, "main", &spv_opaque));
@@ -2911,29 +2886,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(0, #extension GL_EXT_scalar_block_layout : enable);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : enable);
 
-    desc = (FFVulkanDescriptorSetBinding[])
-    {
-        {
-          .name = "out_buf_0",
-          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          .buf_content = "int32_t outBuf0[];",
-          .mem_layout = "std430",
-          .mem_quali = "writeonly",
-          .dimensions = 1,
-        },
-        {
-          .name = "out_buf_1",
-          .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-          .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          .buf_content = "int32_t outBuf1[];",
-          .mem_layout = "std430",
-          .mem_quali = "writeonly",
-          .dimensions = 1,
-        },
-    };
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 2, 0, 0));
-
     GLSLC(0, struct Slice {         );
     GLSLC(1,     int32_t left;      );
     GLSLC(1,     int32_t top;       );
@@ -2952,15 +2904,30 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
     GLSLC(1,     int32_t pad1;          );
     GLSLC(0, };                         );
 
-    desc = (FFVulkanDescriptorSetBinding[])
-    {
+
+    desc = (FFVulkanDescriptorSetBinding[]){
+        {
+            .name = "out_buf_0",
+            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+            .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .buf_content = "int32_t outBuf0[];",
+            .mem_quali = "writeonly",
+            .dimensions = 1,
+        },
+        {
+            .name = "out_buf_1",
+            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+            .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .buf_content = "int32_t outBuf1[];",
+            .mem_quali = "writeonly",
+            .dimensions = 1,
+        },
         {
             .name = "quant_in_buf",
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .buf_content = "int32_t inBuffer[];",
             .mem_quali = "readonly",
-            .mem_layout = "std430",
         },
         {
             .name = "quant_vals_buf",
@@ -2968,7 +2935,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .buf_content = "int32_t quantMatrix[];",
             .mem_quali = "readonly",
-            .mem_layout = "std430",
         },
         {
             .name = "slices_buf",
@@ -2987,7 +2953,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv)
             .mem_layout = "std430",
         },
     };
-    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 4, 1, 0));
+    RET(ff_vk_pipeline_descriptor_set_add(vkctx, pl, shd, desc, 6, 0, 0));
 
     ff_vk_add_push_constant(pl, 0, sizeof(WaveletPushConst), VK_SHADER_STAGE_COMPUTE_BIT);
 
@@ -3047,6 +3013,30 @@ static av_always_inline int inline quant_pl_pass(DiracVulkanDecodeContext *dec,
                                     VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
+
+    err = ff_vk_set_descriptor_buffer(
+        &dec->vkctx, &dec->quant_pl, exec, 0, 2, 0, dec->quant_val_buf->address,
+        dec->quant_val_buf->size, VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
+
+    err = ff_vk_set_descriptor_buffer(
+        &dec->vkctx, &dec->quant_pl, exec, 0, 3, 0, dec->quant_buf->address,
+        dec->quant_buf->size, VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
+
+    err = ff_vk_set_descriptor_buffer(
+        &dec->vkctx, &dec->quant_pl, exec, 0, 4, 0, dec->slice_buf->address,
+        dec->slice_buf->size, VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
+
+    err = ff_vk_set_descriptor_buffer(
+        &dec->vkctx, &dec->quant_pl, exec, 0, 5, 0, dec->subband_info.address,
+        dec->subband_info.size, VK_FORMAT_UNDEFINED);
+    if (err < 0)
+
 
     ff_vk_update_push_exec(&dec->vkctx, exec, &dec->quant_pl,
                            VK_SHADER_STAGE_COMPUTE_BIT,
@@ -3193,7 +3183,7 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     /* Create queue context */
     ff_vk_qf_init(s, &dec->qf, VK_QUEUE_COMPUTE_BIT);
 
-    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 8, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 1, 0, 0, 0, NULL);
 
     err = ff_vk_init_sampler(&dec->vkctx, &dec->sampler, 1, VK_FILTER_LINEAR);
     if (err < 0) {
@@ -3252,14 +3242,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx)
     if (err < 0)
         return err;
 
-    err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl,
-                                    NULL, 1, 3, 0,
-                                    dec->subband_info.address,
-                                    dec->subband_info.size,
-                                    VK_FORMAT_UNDEFINED);
-    if (err < 0)
-        return err;
-
     return 0;
 
 fail:
@@ -3312,8 +3294,9 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fram
     for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
         hwfc->format[i]    = av_vkfmt_from_pixfmt(frames_ctx->sw_format)[i];
     }
-    hwfc->tiling       = VK_IMAGE_TILING_LINEAR;
+    hwfc->tiling       = VK_IMAGE_TILING_OPTIMAL;
     hwfc->usage        = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                          VK_IMAGE_USAGE_STORAGE_BIT;
 
     return err;
@@ -3413,6 +3396,7 @@ static int vulkan_dirac_start_frame(AVCodecContext          *avctx,
 
     return 0;
 }
+
 
 static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     int err, nb_img_bar = 0, nb_buf_bar = 0;
