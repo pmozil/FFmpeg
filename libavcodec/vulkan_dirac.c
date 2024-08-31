@@ -3481,9 +3481,13 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
+    err = ff_vk_exec_submit(&dec->vkctx, exec);
+    if (err < 0)
+        goto fail;
+
     ff_vk_exec_wait(&dec->vkctx, exec);
 
-    return ff_vk_exec_submit(&dec->vkctx, exec);
+    return 0;
 
 fail:
     ff_vk_exec_discard_deps(&dec->vkctx, exec);
