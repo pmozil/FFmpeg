@@ -22,7 +22,7 @@
 #include "libavfilter/vulkan_spirv.h"
 #include "libavutil/vulkan_loader.h"
 #include "libavcodec/pthread_internal.h"
-#include "libavcodec/dirac_vlc.c"
+#include "libavcodec/dirac_vlc.h"
 
 
 typedef struct SubbandOffset {
