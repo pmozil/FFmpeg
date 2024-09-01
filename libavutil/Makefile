@@ -208,6 +208,9 @@ OBJS-$(CONFIG_VULKAN)                   += hwcontext_vulkan.o vulkan.o
 
 OBJS-$(!CONFIG_VULKAN)                  += hwcontext_stub.o
 
+OBJS-$(CONFIG_LIBGLSLANG)               += vulkan_glslang.o
+OBJS-$(CONFIG_LIBSHADERC)               += vulkan_shaderc.o
+
 OBJS += $(COMPAT_OBJS:%=../compat/%)
 
 # Windows resource file
