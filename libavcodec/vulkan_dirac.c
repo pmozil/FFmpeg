@@ -486,8 +486,8 @@ static av_always_inline int inline cpy_to_image_pass(
 
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl[idx]);
 
-    vk->CmdDispatch(exec->buf, ctx->plane[0].width >> 3,
-                    ctx->plane[0].height >> 3, 1);
+    vk->CmdDispatch(exec->buf, ctx->plane[0].width >> 2,
+                    ctx->plane[0].height >> 2, 1);
 
     return 0;
 }
