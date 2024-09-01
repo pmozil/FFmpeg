@@ -2628,7 +2628,8 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
                                  hwctx->tiling, hwctx->format, NULL,
                                  NULL, &supported_usage,
                                  disable_multiplane,
-                                 hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT);
+                                 !hwctx->usage ||
+                                 (hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT));
         if (err < 0)
             return err;
     }
