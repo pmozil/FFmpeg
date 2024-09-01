@@ -470,6 +470,8 @@ typedef struct CodedBitstreamAV1Context {
     int ref_frame_sign_bias[AV1_TOTAL_REFS_PER_FRAME]; // RefFrameSignBias
 
     AV1ReferenceFrameState ref[AV1_NUM_REF_FRAMES];
+    uint8_t ref_frame_sign_bias[AV1_TOTAL_REFS_PER_FRAME];
+    uint8_t order_hints[AV1_TOTAL_REFS_PER_FRAME];
 
     // AVOptions
     int operating_point;

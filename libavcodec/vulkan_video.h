@@ -74,6 +74,7 @@ int ff_vk_video_qf_init(FFVulkanContext *s, FFVkQueueFamilyCtx *qf,
  */
 int ff_vk_h264_level_to_av(StdVideoH264LevelIdc level);
 int ff_vk_h265_level_to_av(StdVideoH265LevelIdc level);
+int ff_vk_av1_level_to_av(StdVideoAV1Level level);
 
 StdVideoH264LevelIdc ff_vk_h264_level_to_vk(int level_idc);
 
