@@ -1676,10 +1676,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
 
     if (s->avctx->hwaccel) {
         ret = ffhwaccel(s->avctx->hwaccel)->end_frame(s->avctx);
-        if (ret == 0) {
-            /* Hwaccel failed - fall back on software decoder */
-        }
-            return ret;
+        return ret;
     }
 
     for (comp = 0; comp < 3; comp++) {
@@ -1769,18 +1766,18 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
                                            &chroma_y_shift);
     if (ret < 0)
         return ret;
+    if (avctx->hwaccel) {
+        f->width  = avctx->width;
+        f->height = avctx->height;
+        ret = ff_get_buffer(avctx, f, flags);
 
-    /*if (avctx->hwaccel) {*/
-    /*    f->width   = s->plane[0].width;*/
-    /*    f->height  = s->plane[0].height;*/
-    /*    ret = ff_get_buffer(avctx, f, flags);*/
-    /*    return ret;*/
-    /*}*/
+        return ret;
+    }
 
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
     ret = ff_get_buffer(avctx, f, flags);
-    if (ret < 0 || avctx->hwaccel)
+    if (ret < 0)
         return ret;
 
     for (i = 0; f->data[i]; i++) {
@@ -1976,18 +1973,14 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         s->pshift = s->bit_depth > 8;
 
-        /*if (s->pshift) {*/
-        /*    avctx->pix_fmt = s->sof_pix_fmt;*/
-        /*} else {*/
-            pix_fmts = (enum AVPixelFormat[]){
+        pix_fmts = (enum AVPixelFormat[]){
 #if CONFIG_DIRAC_VULKAN_HWACCEL
-                AV_PIX_FMT_VULKAN,
+            AV_PIX_FMT_VULKAN,
 #endif
-                s->sof_pix_fmt,
-                AV_PIX_FMT_NONE,
-            };
-            avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
-        /*}*/
+            s->sof_pix_fmt,
+            AV_PIX_FMT_NONE,
+        };
+        avctx->pix_fmt = ff_get_format(s->avctx, pix_fmts);
 
         ret = av_pix_fmt_get_chroma_sub_sample(s->sof_pix_fmt,
                                                &s->chroma_x_shift,

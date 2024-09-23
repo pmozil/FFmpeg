@@ -135,13 +135,6 @@ static void free_common(AVCodecContext *avctx) {
         ff_vk_pipeline_free(s, &dec->horiz_wavelet_pl[i]);
         ff_vk_shader_free(s, &dec->horiz_wavelet_shd[i]);
     }
-    // TODO: Add freeing all pipelines and shaders for wavelets
-    //
-
-    // if (dec->yuv_sampler)
-    //     vk->DestroySamplerYcbcrConversion(s->hwctx->act_dev,
-    //     dec->yuv_sampler,
-    //                                       s->hwctx->alloc);
     if (dec->sampler)
         vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
@@ -225,8 +218,6 @@ static inline int alloc_tmp_bufs(DiracContext *ctx,
 static inline int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec,
                                         size_t req_size, void **mem,
                                         AVBufferRef **avbuf, FFVkBuffer **buf) {
-    // FFVulkanFunctions *vk = &dec->vkctx.vkfn;
-    // VkResult ret;
     int err;
 
     err = ff_vk_create_avbuf(&dec->vkctx, avbuf, req_size, NULL, NULL,
@@ -305,9 +296,8 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     SliceCoeffVk tmp[MAX_DWT_LEVELS];
     coef_buf_size =
         subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, tmp) + 8;
-    coef_buf_size = coef_buf_size + 512;
+    coef_buf_size = coef_buf_size + 512 * sizeof(int32_t);
     dec->slice_vals_size = coef_buf_size / sizeof(int32_t);
-    // coef_buf_size *= sizeof(int32_t);
 
     if (dec->quant_val_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_val_buf);
@@ -364,8 +354,7 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             .mem_quali = "writeonly",
-            // .mem_layout = ff_vk_shader_rep_fmt(vkctx->output_format),
-            .mem_layout = "rgba16f",
+            .mem_layout = "rgba32f",
             .dimensions = 2,
             .elems = planes,
         },
@@ -432,7 +421,7 @@ static av_always_inline int inline cpy_to_image_pass(
     DiracVulkanDecodePicture *pic = ctx->hwaccel_picture_private;
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->cpy_to_image_pl[idx],
-                                      exec, 0, 0, 0, dec->tmp_buf.address,
+                                      exec, 0, 0, 0, &dec->tmp_buf, 0,
                                       dec->tmp_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
@@ -471,7 +460,7 @@ static av_always_inline int inline cpy_to_image_pass(
     ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe, img_bar,
                         nb_img_bar, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL,
                         VK_QUEUE_FAMILY_IGNORED);
 
     vk->CmdPipelineBarrier2(
@@ -485,8 +474,22 @@ static av_always_inline int inline cpy_to_image_pass(
 
     ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->cpy_to_image_pl[idx]);
 
-    vk->CmdDispatch(exec->buf, ctx->plane[0].width >> 3,
-                    ctx->plane[0].height >> 3, 3);
+    vk->CmdDispatch(exec->buf, ctx->plane[0].idwt.width >> 3,
+                    ctx->plane[0].idwt.height >> 3, 3);
+
+    prev_nb_img_bar = *nb_img_bar;
+    ff_vk_frame_barrier(&dec->vkctx, exec, pic->frame->avframe, img_bar,
+                        nb_img_bar, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_QUEUE_FAMILY_IGNORED);
+
+    vk->CmdPipelineBarrier2(
+        exec->buf, &(VkDependencyInfo){
+                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                       .pImageMemoryBarriers = img_bar + prev_nb_img_bar,
+                       .imageMemoryBarrierCount = *nb_img_bar - prev_nb_img_bar,
+                   });
 
     return 0;
 }
@@ -590,7 +593,7 @@ static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -687,7 +690,7 @@ static int init_wavelet_shd_legall_horiz(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -780,23 +783,23 @@ static av_always_inline int inline wavelet_legall_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -829,6 +832,7 @@ static av_always_inline int inline wavelet_legall_pass(
                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                sizeof(WaveletPushConst), &dec->pConst);
 
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         barrier_num = *nb_buf_bar;
         bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
         bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -843,15 +847,15 @@ static av_always_inline int inline wavelet_legall_pass(
                 .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
             });
 
-        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4, 1);
+                        dec->pConst.real_plane_dims[1] >> 4, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                sizeof(WaveletPushConst), &dec->pConst);
 
+        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         barrier_num = *nb_buf_bar;
         bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
         bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -866,9 +870,8 @@ static av_always_inline int inline wavelet_legall_pass(
                 .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
             });
 
-        ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+                        dec->pConst.real_plane_dims[1] >> 3, 3);
     }
 
     barrier_num = *nb_buf_bar;
@@ -1041,7 +1044,7 @@ static int init_wavelet_shd_fidelity_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -1140,7 +1143,7 @@ static int init_wavelet_shd_fidelity_horiz(DiracVulkanDecodeContext *s,
                           VK_SHADER_STAGE_COMPUTE_BIT, 0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -1234,23 +1237,23 @@ static av_always_inline int inline wavelet_fidelity_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -1299,7 +1302,7 @@ static av_always_inline int inline wavelet_fidelity_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4, 1);
+                        dec->pConst.real_plane_dims[1] >> 4, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -1322,7 +1325,7 @@ static av_always_inline int inline wavelet_fidelity_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+                        dec->pConst.real_plane_dims[1] >> 3, 3);
     }
 
     barrier_num = *nb_buf_bar;
@@ -1465,7 +1468,7 @@ static int init_wavelet_shd_daub97_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 1, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 1, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -1477,7 +1480,6 @@ static int init_wavelet_shd_daub97_vert(DiracVulkanDecodeContext *s,
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .buf_content = "int32_t inBuf[];",
-            /*.mem_quali = "readonly",*/
             .dimensions = 1,
         },
         {
@@ -1596,7 +1598,7 @@ static int init_wavelet_shd_daub97_horiz(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -1695,23 +1697,23 @@ static av_always_inline int inline wavelet_daub97_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -1759,7 +1761,7 @@ static av_always_inline int inline wavelet_daub97_pass(
             });
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
-        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0], 1, 1);
+        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0], 1, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -1782,7 +1784,7 @@ static av_always_inline int inline wavelet_daub97_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+                        dec->pConst.real_plane_dims[1] >> 3, 3);
 
         barrier_num = *nb_buf_bar;
         bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -1869,7 +1871,7 @@ static int init_wavelet_shd_dd97_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -1966,7 +1968,7 @@ static int init_wavelet_shd_dd97_horiz(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -2059,23 +2061,23 @@ static av_always_inline int inline wavelet_dd97_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -2124,7 +2126,7 @@ static av_always_inline int inline wavelet_dd97_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4, 1);
+                        dec->pConst.real_plane_dims[1] >> 4, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -2147,7 +2149,7 @@ static av_always_inline int inline wavelet_dd97_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+                        dec->pConst.real_plane_dims[1] >> 3, 3);
 
         barrier_num = *nb_buf_bar;
         bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -2280,7 +2282,7 @@ static int init_wavelet_shd_dd137_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -2378,7 +2380,7 @@ static int init_wavelet_shd_dd137_horiz(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_debug_printf : enable);
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
@@ -2472,23 +2474,23 @@ static av_always_inline int inline wavelet_dd137_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -2537,7 +2539,7 @@ static av_always_inline int inline wavelet_dd137_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4, 1);
+                        dec->pConst.real_plane_dims[1] >> 4, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -2560,7 +2562,7 @@ static av_always_inline int inline wavelet_dd137_pass(
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+                        dec->pConst.real_plane_dims[1] >> 3, 3);
 
         barrier_num = *nb_buf_bar;
         bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -2643,7 +2645,7 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->vert_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -2737,7 +2739,7 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s,
                           0));
 
     shd = &s->horiz_wavelet_shd[wavelet_idx];
-    ff_vk_shader_set_compute_sizes(shd, 8, 8, 3);
+    ff_vk_shader_set_compute_sizes(shd, 8, 8, 1);
 
     GLSLC(0, #extension GL_EXT_scalar_block_layout : require);
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require);
@@ -2827,23 +2829,23 @@ static av_always_inline int inline wavelet_haari_pass(
     FFVulkanPipeline *pl_vert = &dec->vert_wavelet_pl[wavelet_idx];
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_vert, exec, 0, 0, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_vert, exec, 0, 1, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_vert, exec, 0, 1, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, pl_hor, exec, 0, 0, 0, dec->tmp_interleave_buf.address,
+        &dec->vkctx, pl_hor, exec, 0, 0, 0, &dec->tmp_interleave_buf, 0,
         dec->tmp_interleave_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, pl_hor, exec, 0, 1, 0,
-                                      dec->tmp_buf.address, dec->tmp_buf.size,
+                                      &dec->tmp_buf, 0, dec->tmp_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         goto fail;
@@ -2893,8 +2895,8 @@ static av_always_inline int inline wavelet_haari_pass(
             });
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_vert);
-        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 3,
-                        dec->pConst.real_plane_dims[1] >> 4, 1);
+        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 1,
+                        dec->pConst.real_plane_dims[1] >> 2, 3);
 
         /* Horizontal wavelet pass */
         ff_vk_update_push_exec(&dec->vkctx, exec, pl_hor,
@@ -2916,8 +2918,8 @@ static av_always_inline int inline wavelet_haari_pass(
             });
 
         ff_vk_exec_bind_pipeline(&dec->vkctx, exec, pl_hor);
-        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
-                        dec->pConst.real_plane_dims[1] >> 3, 1);
+        vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 2,
+                        dec->pConst.real_plane_dims[1] >> 1, 3);
     }
 
     barrier_num = *nb_buf_bar;
@@ -3120,41 +3122,39 @@ static av_always_inline int inline quant_pl_pass(
     int err, nb_bar;
     FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
-    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
-
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl, exec, 0, 0,
-                                      0, dec->tmp_buf.address,
+                                      0, &dec->tmp_buf, 0,
                                       dec->tmp_buf.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(&dec->vkctx, &dec->quant_pl, exec, 0, 1,
-                                      0, dec->tmp_interleave_buf.address,
+                                      0, &dec->tmp_interleave_buf, 0,
                                       dec->tmp_interleave_buf.size,
                                       VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, &dec->quant_pl, exec, 0, 2, 0, dec->quant_val_buf->address,
+        &dec->vkctx, &dec->quant_pl, exec, 0, 2, 0, dec->quant_val_buf, 0,
         dec->quant_val_buf->size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, &dec->quant_pl, exec, 0, 3, 0, dec->quant_buf->address,
+        &dec->vkctx, &dec->quant_pl, exec, 0, 3, 0, dec->quant_buf, 0,
         dec->quant_buf->size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, &dec->quant_pl, exec, 0, 4, 0, dec->slice_buf->address,
+        &dec->vkctx, &dec->quant_pl, exec, 0, 4, 0, dec->slice_buf, 0,
         dec->slice_buf->size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
 
     err = ff_vk_set_descriptor_buffer(
-        &dec->vkctx, &dec->quant_pl, exec, 0, 5, 0, dec->subband_info.address,
+        &dec->vkctx, &dec->quant_pl, exec, 0, 5, 0, &dec->subband_info, 0,
         dec->subband_info.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
@@ -3200,6 +3200,7 @@ static av_always_inline int inline quant_pl_pass(
                                 .bufferMemoryBarrierCount = *nb_buf_bar,
                             });
 
+    ff_vk_exec_bind_pipeline(&dec->vkctx, exec, &dec->quant_pl);
     vk->CmdDispatch(exec->buf, ctx->num_x * ctx->num_y, 3, ctx->wavelet_depth);
 
     nb_bar = *nb_buf_bar;
@@ -3219,11 +3220,6 @@ static av_always_inline int inline quant_pl_pass(
 }
 
 static int vulkan_dirac_uninit(AVCodecContext *avctx) {
-    // DiracContext *d = avctx->priv_data;
-    // if (d->hwaccel_picture_private) {
-    //     av_freep(d->hwaccel_picture_private);
-    // }
-
     free_common(avctx);
 
     return 0;
@@ -3327,14 +3323,16 @@ static int vulkan_dirac_init(AVCodecContext *avctx) {
 
     err = ff_vk_init(s, avctx, NULL, avctx->hw_frames_ctx);
     if (err < 0)
-        return err;
+        goto fail;
 
     /* Create queue context */
     ff_vk_qf_init(s, &dec->qf, VK_QUEUE_COMPUTE_BIT);
 
-    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 4, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(s, &dec->qf, &dec->exec_pool, 8, 0, 0, 0, NULL);
+    if (err < 0)
+        goto fail;
 
-    err = ff_vk_init_sampler(&dec->vkctx, &dec->sampler, 1, VK_FILTER_NEAREST);
+    err = ff_vk_init_sampler(&dec->vkctx, &dec->sampler, 1, VK_FILTER_LINEAR);
     if (err < 0) {
         goto fail;
     }
@@ -3385,12 +3383,12 @@ static int vulkan_dirac_init(AVCodecContext *avctx) {
                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (err < 0)
-        return err;
+        goto fail;
 
     err = ff_vk_map_buffer(&dec->vkctx, &dec->subband_info,
                            (uint8_t **)&dec->subband_info_ptr, 0);
     if (err < 0)
-        return err;
+        goto fail;
 
     return 0;
 
@@ -3424,27 +3422,28 @@ static int vulkan_dirac_frame_params(AVCodecContext *avctx,
     DiracContext *s = avctx->priv_data;
 
     frames_ctx->sw_format = s->sof_pix_fmt;
+    frames_ctx->width = avctx->width;
+    frames_ctx->height = avctx->height;
+    frames_ctx->format = AV_PIX_FMT_VULKAN;
 
     err = vulkan_decode_bootstrap(avctx, hw_frames_ctx);
     if (err < 0)
         return err;
 
-    frames_ctx->width = avctx->coded_width;
-    frames_ctx->height = avctx->coded_height;
-    frames_ctx->format = AV_PIX_FMT_VULKAN;
 
     for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
         hwfc->format[i] = av_vkfmt_from_pixfmt(frames_ctx->sw_format)[i];
     }
 
     hwfc->tiling = VK_IMAGE_TILING_OPTIMAL;
-    hwfc->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    hwfc->usage =   VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                    VK_IMAGE_USAGE_STORAGE_BIT;
 
     return err;
 }
 
 static void vulkan_dirac_free_frame_priv(FFRefStructOpaque _hwctx, void *data) {
-    // AVHWDeviceContext *hwctx = _hwctx.nc;
     DiracVulkanDecodePicture *dp = data;
 
     /* Free frame resources */
@@ -3473,11 +3472,6 @@ static void setup_subbands(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
                     off->base_off += w;
                 if (orient > 1)
                     off->base_off += (s >> 1);
-
-                /*SubBand *b = &p->band[level][orient];*/
-                /*int w = (b->ibuf - p->idwt.buf) >> (1 + b->pshift);*/
-                /*off->stride = b->stride >> (1 + b->pshift);*/
-                /*off->base_off = w;*/
             }
         }
     }
@@ -3546,24 +3540,11 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
 
     ff_vk_exec_start(&dec->vkctx, exec);
 
-    err =
-        ff_vk_exec_add_dep_buf(&dec->vkctx, exec, &dec->av_quant_val_buf, 1, 1);
-    if (err < 0)
-        goto fail;
-
-    err = ff_vk_exec_add_dep_buf(&dec->vkctx, exec, &dec->av_quant_buf, 1, 1);
-    if (err < 0)
-        goto fail;
-
-    err = ff_vk_exec_add_dep_buf(&dec->vkctx, exec, &dec->av_slice_buf, 1, 1);
-    if (err < 0)
-        goto fail;
-
     err = quant_pl_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
     if (err < 0)
         goto fail;
 
-    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, pic->frame->avframe,
+    err = ff_vk_exec_add_dep_frame(&dec->vkctx, exec, ctx->current_picture->avframe,
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     if (err < 0)
@@ -3642,10 +3623,16 @@ static int vulkan_dirac_update_thread_context(AVCodecContext *dst,
     memset(dst_ctx, 0, sizeof(DiracVulkanDecodeContext));
 
     dst_ctx->vkctx = src_ctx->vkctx;
-    dst_ctx->sampler = src_ctx->sampler;
-    dst_ctx->qf = src_ctx->qf;
-    dst_ctx->exec_pool = src_ctx->exec_pool;
-    dst_ctx->quant_pl = src_ctx->quant_pl;
+    ff_vk_qf_init(&dst_ctx->vkctx, &dst_ctx->qf, VK_QUEUE_COMPUTE_BIT);
+
+    err = ff_vk_exec_pool_init(&dst_ctx->vkctx, &dst_ctx->qf, &dst_ctx->exec_pool, 8, 0, 0, 0, NULL);
+    if (err < 0)
+        goto fail;
+
+    err = ff_vk_init_sampler(&dst_ctx->vkctx, &dst_ctx->sampler, 1, VK_FILTER_LINEAR);
+    if (err < 0) {
+        goto fail;
+    }
 
     err = init_quant_shd(dst_ctx, spv);
     if (err < 0) {
@@ -3691,12 +3678,12 @@ static int vulkan_dirac_update_thread_context(AVCodecContext *dst,
                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (err < 0)
-        return err;
+        goto fail;
 
     err = ff_vk_map_buffer(&dst_ctx->vkctx, &dst_ctx->subband_info,
                            (uint8_t **)&dst_ctx->subband_info_ptr, 0);
     if (err < 0)
-        return err;
+        goto fail;
 
     return 0;
 
@@ -3787,7 +3774,6 @@ static int vulkan_dirac_decode_slice(AVCodecContext *avctx, const uint8_t *data,
                                      uint32_t size) {
     DiracContext *s = avctx->priv_data;
 
-    /*avctx->execute2(avctx, decode_hq_slice_row, NULL, NULL, s->num_y);*/
     for (int i = 0; i < s->num_y; i++) {
         decode_hq_slice_row(avctx, NULL, i, 0);
     }
@@ -3812,6 +3798,5 @@ const FFHWAccel ff_dirac_vulkan_hwaccel = {
     .flush = &ff_vk_decode_flush,
     .update_thread_context = &vulkan_dirac_update_thread_context,
     .priv_data_size = sizeof(DiracVulkanDecodeContext),
-    // .caps_internal = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
-    .caps_internal = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
+    .caps_internal = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
 };
