@@ -56,6 +56,9 @@ typedef struct FFVulkanDecodeShared {
     VkVideoDecodeCapabilitiesKHR dec_caps;
 
     VkVideoSessionParametersKHR empty_session_params;
+
+    /* Software-defined decoder context */
+    void *sd_ctx;
 } FFVulkanDecodeShared;
 
 typedef struct FFVulkanDecodeContext {
@@ -140,6 +143,13 @@ int ff_vk_params_invalidate(AVCodecContext *avctx, int t, const uint8_t *b, uint
 int ff_vk_decode_prepare_frame(FFVulkanDecodeContext *dec, AVFrame *pic,
                                FFVulkanDecodePicture *vkpic, int is_current,
                                int alloc_dpb);
+
+/**
+ * Software-defined decoder version of ff_vk_decode_prepare_frame.
+ */
+int ff_vk_decode_prepare_frame_sdr(FFVulkanDecodeContext *dec, AVFrame *pic,
+                                   FFVulkanDecodePicture *vkpic, int is_current,
+                                   enum FFVkShaderRepFormat rep_fmt, int alloc_dpb);
 
 /**
  * Add slice data to frame.
