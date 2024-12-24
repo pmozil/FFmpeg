@@ -136,14 +136,15 @@ typedef struct FFv1VkResetParameters {
     uint32_t context_count;
     uint8_t codec_planes;
     uint8_t key_frame;
-    uint8_t padding[3];
+    uint8_t version;
+    uint8_t micro_version;
+    uint8_t padding[1];
 } FFv1VkResetParameters;
 
 typedef struct FFv1VkParameters {
     VkDeviceAddress slice_state;
     VkDeviceAddress scratch_data;
     VkDeviceAddress out_data;
-    uint64_t slice_size_max;
 
     int32_t sar[2];
     uint32_t chroma_shift[2];
@@ -151,6 +152,7 @@ typedef struct FFv1VkParameters {
     uint32_t plane_state_size;
     uint32_t context_count;
     uint32_t crcref;
+    uint32_t slice_size_max;
 
     uint8_t bits_per_raw_sample;
     uint8_t context_model;
@@ -175,7 +177,6 @@ static void add_push_data(FFVulkanShader *shd)
     GLSLC(1,    u8buf slice_state;                                            );
     GLSLC(1,    u8buf scratch_data;                                           );
     GLSLC(1,    u8buf out_data;                                               );
-    GLSLC(1,    uint64_t slice_size_max;                                      );
     GLSLC(0,                                                                  );
     GLSLC(1,    ivec2 sar;                                                    );
     GLSLC(1,    uvec2 chroma_shift;                                           );
@@ -183,6 +184,7 @@ static void add_push_data(FFVulkanShader *shd)
     GLSLC(1,    uint plane_state_size;                                        );
     GLSLC(1,    uint context_count;                                           );
     GLSLC(1,    uint32_t crcref;                                              );
+    GLSLC(1,    uint32_t slice_size_max;                                      );
     GLSLC(0,                                                                  );
     GLSLC(1,    uint8_t bits_per_raw_sample;                                  );
     GLSLC(1,    uint8_t context_model;                                        );
@@ -492,7 +494,6 @@ static int vulkan_encode_ffv1_submit_frame(AVCodecContext *avctx,
         .slice_state = slice_data_buf->address + f->slice_count*256,
         .scratch_data = tmp_data_buf->address,
         .out_data = out_data_buf->address,
-        .slice_size_max = out_data_buf->size / f->slice_count,
         .bits_per_raw_sample = f->bits_per_raw_sample,
         .sar[0] = pict->sample_aspect_ratio.num,
         .sar[1] = pict->sample_aspect_ratio.den,
@@ -501,6 +502,7 @@ static int vulkan_encode_ffv1_submit_frame(AVCodecContext *avctx,
         .plane_state_size = plane_state_size,
         .context_count = context_count,
         .crcref = f->crcref,
+        .slice_size_max = out_data_buf->size / f->slice_count,
         .context_model = fv->ctx.context_model,
         .version = f->version,
         .micro_version = f->micro_version,
@@ -966,7 +968,6 @@ static void define_shared_code(AVCodecContext *avctx, FFVulkanShader *shd)
     GLSLF(0, #define TYPE int%i_t                                        ,smp_bits);
     GLSLF(0, #define VTYPE2 i%ivec2                                      ,smp_bits);
     GLSLF(0, #define VTYPE3 i%ivec3                                      ,smp_bits);
-    GLSLD(ff_source_common_comp);
     GLSLD(ff_source_rangecoder_comp);
 
     if (f->ac == AC_GOLOMB_RICE)
@@ -992,6 +993,10 @@ static int init_setup_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
                                              "GL_EXT_buffer_reference2" }, 2,
                           1, 1, 1,
                           0));
+
+    /* Common codec header */
+    GLSLD(ff_source_common_comp);
+    add_push_data(shd);
 
     av_bprintf(&shd->src, "#define MAX_QUANT_TABLES %i\n", MAX_QUANT_TABLES);
     av_bprintf(&shd->src, "#define MAX_CONTEXT_INPUTS %i\n", MAX_CONTEXT_INPUTS);
@@ -1038,8 +1043,6 @@ static int init_setup_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
     };
     RET(ff_vk_shader_add_descriptor_set(&fv->s, shd, desc_set, 2, 0, 0));
 
-    add_push_data(shd);
-
     GLSLD(ff_source_ffv1_enc_setup_comp);
 
     RET(spv->compile_shader(&fv->s, spv, shd, &spv_data, &spv_len, "main",
@@ -1073,6 +1076,22 @@ static int init_reset_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
                                              "GL_EXT_buffer_reference2" }, 2,
                           wg_dim, 1, 1,
                           0));
+
+    /* Common codec header */
+    GLSLD(ff_source_common_comp);
+
+    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {             );
+    GLSLC(1,    u8buf slice_state;                                             );
+    GLSLC(1,    uint plane_state_size;                                         );
+    GLSLC(1,    uint context_count;                                            );
+    GLSLC(1,    uint8_t codec_planes;                                          );
+    GLSLC(1,    uint8_t key_frame;                                             );
+    GLSLC(1,    uint8_t version;                                               );
+    GLSLC(1,    uint8_t micro_version;                                         );
+    GLSLC(1,    uint8_t padding[1];                                            );
+    GLSLC(0, };                                                                );
+    ff_vk_shader_add_push_const(shd, 0, sizeof(FFv1VkResetParameters),
+                                VK_SHADER_STAGE_COMPUTE_BIT);
 
     av_bprintf(&shd->src, "#define MAX_QUANT_TABLES %i\n", MAX_QUANT_TABLES);
     av_bprintf(&shd->src, "#define MAX_CONTEXT_INPUTS %i\n", MAX_CONTEXT_INPUTS);
@@ -1109,17 +1128,6 @@ static int init_reset_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
         },
     };
     RET(ff_vk_shader_add_descriptor_set(&fv->s, shd, desc_set, 1, 0, 0));
-
-    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {             );
-    GLSLC(1,    u8buf slice_state;                                             );
-    GLSLC(1,    uint plane_state_size;                                         );
-    GLSLC(1,    uint context_count;                                            );
-    GLSLC(1,    uint8_t codec_planes;                                          );
-    GLSLC(1,    uint8_t key_frame;                                             );
-    GLSLC(1,    uint8_t padding[3];                                            );
-    GLSLC(0, };                                                                );
-    ff_vk_shader_add_push_const(shd, 0, sizeof(FFv1VkResetParameters),
-                                VK_SHADER_STAGE_COMPUTE_BIT);
 
     GLSLD(ff_source_ffv1_reset_comp);
 
@@ -1164,6 +1172,18 @@ static int init_rct_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
                           wg_count, wg_count, 1,
                           0));
 
+    define_shared_code(avctx, shd);
+
+    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {             );
+    GLSLC(1,    int offset;                                                    );
+    GLSLC(1,    uint8_t bits;                                                  );
+    GLSLC(1,    uint8_t planar_rgb;                                            );
+    GLSLC(1,    uint8_t transparency;                                          );
+    GLSLC(1,    uint8_t padding[1];                                            );
+    GLSLC(0, };                                                                );
+    ff_vk_shader_add_push_const(shd, 0, sizeof(FFv1VkRCTParameters),
+                                VK_SHADER_STAGE_COMPUTE_BIT);
+
     av_bprintf(&shd->src, "#define MAX_QUANT_TABLES %i\n", MAX_QUANT_TABLES);
     av_bprintf(&shd->src, "#define MAX_CONTEXT_INPUTS %i\n", MAX_CONTEXT_INPUTS);
     av_bprintf(&shd->src, "#define MAX_QUANT_TABLE_SIZE %i\n", MAX_QUANT_TABLE_SIZE);
@@ -1186,8 +1206,6 @@ static int init_rct_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
         },
     };
     RET(ff_vk_shader_add_descriptor_set(&fv->s, shd, desc_set, 2, 1, 0));
-
-    define_shared_code(avctx, shd);
 
     desc_set = (FFVulkanDescriptorSetBinding []) {
         {
@@ -1219,16 +1237,6 @@ static int init_rct_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
         },
     };
     RET(ff_vk_shader_add_descriptor_set(&fv->s, shd, desc_set, 3, 0, 0));
-
-    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {             );
-    GLSLC(1,    int offset;                                                    );
-    GLSLC(1,    uint8_t bits;                                                  );
-    GLSLC(1,    uint8_t planar_rgb;                                            );
-    GLSLC(1,    uint8_t transparency;                                          );
-    GLSLC(1,    uint8_t padding[1];                                            );
-    GLSLC(0, };                                                                );
-    ff_vk_shader_add_push_const(shd, 0, sizeof(FFv1VkRCTParameters),
-                                VK_SHADER_STAGE_COMPUTE_BIT);
 
     GLSLD(ff_source_ffv1_enc_rct_comp);
 
@@ -1267,6 +1275,11 @@ static int init_encode_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
                                              "GL_EXT_buffer_reference2" }, 2,
                           1, 1, 1,
                           0));
+
+    /* Common codec header */
+    GLSLD(ff_source_common_comp);
+
+    add_push_data(shd);
 
     av_bprintf(&shd->src, "#define MAX_QUANT_TABLES %i\n", MAX_QUANT_TABLES);
     av_bprintf(&shd->src, "#define MAX_CONTEXT_INPUTS %i\n", MAX_CONTEXT_INPUTS);
@@ -1327,8 +1340,6 @@ static int init_encode_shader(AVCodecContext *avctx, FFVkSPIRVCompiler *spv)
         },
     };
     RET(ff_vk_shader_add_descriptor_set(&fv->s, shd, desc_set, 3, 0, 0));
-
-    add_push_data(shd);
 
     /* Assemble the shader body */
     GLSLD(ff_source_ffv1_enc_common_comp);
