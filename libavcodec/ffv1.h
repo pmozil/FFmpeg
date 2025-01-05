@@ -122,6 +122,7 @@ typedef struct FFV1Context {
     int64_t picture_number;
     int key_frame;
     ProgressFrame picture, last_picture;
+    void *hwaccel_picture_private, *hwaccel_last_picture_private;
     uint32_t crcref;
     enum AVPixelFormat pix_fmt;
 

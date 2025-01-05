@@ -41,6 +41,9 @@
 #include "libavutil/refstruct.h"
 #include "thread.h"
 #include "decode.h"
+#include "hwconfig.h"
+#include "hwaccel_internal.h"
+#include "config_components.h"
 
 static inline av_flatten int get_symbol_inline(RangeCoder *c, uint8_t *state,
                                                int is_signed)
@@ -1052,13 +1055,13 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     FFV1Context *f      = avctx->priv_data;
     int ret;
     AVFrame *p;
+    const FFHWAccel *hwaccel = NULL;
 
     /* This is copied onto the first slice's range coder context */
     RangeCoder c;
 
     ff_progress_frame_unref(&f->last_picture);
     FFSWAP(ProgressFrame, f->picture, f->last_picture);
-
 
     f->avctx = avctx;
     f->frame_damaged = 0;
@@ -1067,8 +1070,15 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     if (ret < 0)
         return ret;
 
+    if (avctx->hwaccel)
+        hwaccel = ffhwaccel(avctx->hwaccel);
+
     ret = ff_progress_frame_get_buffer(avctx, &f->picture,
                                        AV_GET_BUFFER_FLAG_REF);
+    if (ret < 0)
+        return ret;
+
+    ret = ff_hwaccel_frame_priv_alloc(avctx, &f->hwaccel_picture_private);
     if (ret < 0)
         return ret;
 
@@ -1088,15 +1098,53 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         av_log(avctx, AV_LOG_DEBUG, "ver:%d keyframe:%d coder:%d ec:%d slices:%d bps:%d\n",
                f->version, !!(p->flags & AV_FRAME_FLAG_KEY), f->ac, f->ec, f->slice_count, f->avctx->bits_per_raw_sample);
 
+    /* Start */
+    if (hwaccel) {
+        ret = hwaccel->start_frame(avctx, avpkt->data, avpkt->size);
+        if (ret < 0)
+            return ret;
+    }
+
     ff_thread_finish_setup(avctx);
 
-    ret = decode_slices(avctx, c, avpkt);
-    if (ret < 0)
-        return ret;
+    /* Decode slices */
+    if (hwaccel) {
+        uint8_t *buf_end = avpkt->data + avpkt->size;
+
+        if (!(p->flags & AV_FRAME_FLAG_KEY) && f->last_picture.f)
+            ff_progress_frame_await(&f->last_picture, f->slice_count - 1);
+
+        for (int i = f->slice_count - 1; i >= 0; i--) {
+            uint8_t *pos;
+            uint32_t len;
+            ret = find_next_slice(avctx, avpkt->data, buf_end, i,
+                                  &pos, &len);
+            if (ret < 0)
+                return ret;
+
+            buf_end -= len;
+
+            ret = hwaccel->decode_slice(avctx, pos, len);
+            if (ret < 0)
+                return ret;
+        }
+    } else {
+        ret = decode_slices(avctx, c, avpkt);
+        if (ret < 0)
+            return ret;
+    }
+
+    /* Finalize */
+    if (hwaccel) {
+        ret = hwaccel->end_frame(avctx);
+        if (ret < 0)
+            return ret;
+    }
 
     ff_progress_frame_report(&f->picture, INT_MAX);
 
     ff_progress_frame_unref(&f->last_picture);
+    av_refstruct_unref(&f->hwaccel_last_picture_private);
     if ((ret = av_frame_ref(rframe, f->picture.f)) < 0)
         return ret;
 
@@ -1170,7 +1218,10 @@ static av_cold int ffv1_decode_close(AVCodecContext *avctx)
     FFV1Context *const s = avctx->priv_data;
 
     ff_progress_frame_unref(&s->picture);
+    av_refstruct_unref(&s->hwaccel_picture_private);
+
     ff_progress_frame_unref(&s->last_picture);
+    av_refstruct_unref(&s->hwaccel_last_picture_private);
 
     return ff_ffv1_close(avctx);
 }
@@ -1189,4 +1240,7 @@ const FFCodec ff_ffv1_decoder = {
                       AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
                       FF_CODEC_CAP_USES_PROGRESSFRAMES,
+    .hw_configs     = (const AVCodecHWConfigInternal *const []) {
+        NULL
+    },
 };
