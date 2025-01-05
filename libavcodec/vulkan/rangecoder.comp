@@ -191,3 +191,78 @@ void rac_init(out RangeCoder r, u8buf data, uint buf_size)
     r.outstanding_count = uint16_t(0);
     r.outstanding_byte = uint8_t(0xFF);
 }
+
+/* Decoder */
+uint overread;
+bool corrupt;
+
+void rac_init_dec(out RangeCoder r, u8buf data, uint buf_size)
+{
+    overread = 0;
+    corrupt = false;
+
+    /* Skip priming bytes */
+    rac_init(r, OFFBUF(u8buf, data, 2), buf_size - 2);
+
+    uint16_t prime = u16buf(data).v;
+    /* Switch endianess of the priming bytes */
+    prime = pack16(unpack8(prime).yx);
+
+    r.low = prime;
+    if (prime >= 0xFF00) {
+        r.low = 0xFF00;
+        r.bytestream_end = uint64_t(data) + 2;
+    }
+}
+
+void refill(inout RangeCoder c)
+{
+    c.range <<= 8;
+    c.low   <<= 8;
+    if (c.bytestream < c.bytestream_end) {
+        c.low += u8buf(c.bytestream).v;
+        c.bytestream++;
+    } else {
+        overread++;
+    }
+}
+
+bool get_rac(inout RangeCoder c, uint64_t state)
+{
+    u8buf sb = u8buf(state);
+    uint val = uint(sb.v);
+    uint16_t range1 = uint16_t((uint(c.range) * val) >> 8);
+
+    c.range -= range1;
+
+    bool bit = c.low >= c.range;
+    sb.v = zero_one_state[(uint(bit) << 8) + val];
+
+    if (bit) {
+        c.low -= c.range;
+        c.range = range1;
+    }
+
+    if (c.range < 0x100)
+        refill(c);
+
+    return bit;
+}
+
+bool get_rac_equi(inout RangeCoder c)
+{
+    uint16_t range1 = c.range >> 1;
+
+    c.range -= range1;
+
+    bool bit = c.low >= c.range;
+    if (bit) {
+        c.low -= c.range;
+        c.range = range1;
+    }
+
+    if (c.range < 0x100)
+        refill(c);
+
+    return bit;
+}
