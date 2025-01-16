@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/crc.h"
 #include "libavutil/mem.h"
 #include "libavutil/vulkan.h"
 #include "libavutil/vulkan_spirv.h"
@@ -32,6 +31,7 @@
 
 #include "ffv1.h"
 #include "ffv1enc.h"
+#include "ffv1_vulkan.h"
 
 /* Parallel Golomb alignment */
 #define LG_ALIGN_W 32
@@ -1367,110 +1367,6 @@ fail:
     return err;
 }
 
-static int init_state_transition_data(AVCodecContext *avctx)
-{
-    int err;
-    VulkanEncodeFFv1Context *fv = avctx->priv_data;
-
-    uint8_t *buf_mapped;
-    size_t buf_len = 512*sizeof(uint8_t);
-
-    RET(ff_vk_create_buf(&fv->s, &fv->rangecoder_static_buf,
-                         buf_len,
-                         NULL, NULL,
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT));
-    RET(ff_vk_map_buffer(&fv->s, &fv->rangecoder_static_buf,
-                         &buf_mapped, 0));
-
-    for (int i = 1; i < 256; i++) {
-        buf_mapped[256 + i] = fv->ctx.state_transition[i];
-        buf_mapped[256 - i] = 256 - (int)fv->ctx.state_transition[i];
-    }
-
-    RET(ff_vk_unmap_buffer(&fv->s, &fv->rangecoder_static_buf, 1));
-
-    /* Update descriptors */
-    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
-                                        &fv->setup, 0, 0, 0,
-                                        &fv->rangecoder_static_buf,
-                                        0, fv->rangecoder_static_buf.size,
-                                        VK_FORMAT_UNDEFINED));
-    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
-                                        &fv->enc, 0, 0, 0,
-                                        &fv->rangecoder_static_buf,
-                                        0, fv->rangecoder_static_buf.size,
-                                        VK_FORMAT_UNDEFINED));
-
-fail:
-    return err;
-}
-
-static int init_quant_table_data(AVCodecContext *avctx)
-{
-    int err;
-    VulkanEncodeFFv1Context *fv = avctx->priv_data;
-
-    int16_t *buf_mapped;
-    size_t buf_len = MAX_QUANT_TABLES*
-                     MAX_CONTEXT_INPUTS*
-                     MAX_QUANT_TABLE_SIZE*sizeof(int16_t);
-
-    RET(ff_vk_create_buf(&fv->s, &fv->quant_buf,
-                         buf_len,
-                         NULL, NULL,
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT));
-    RET(ff_vk_map_buffer(&fv->s, &fv->quant_buf, (void *)&buf_mapped, 0));
-
-    memcpy(buf_mapped, fv->ctx.quant_tables,
-           sizeof(fv->ctx.quant_tables));
-
-    RET(ff_vk_unmap_buffer(&fv->s, &fv->quant_buf, 1));
-    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
-                                        &fv->enc, 0, 1, 0,
-                                        &fv->quant_buf,
-                                        0, fv->quant_buf.size,
-                                        VK_FORMAT_UNDEFINED));
-
-fail:
-    return err;
-}
-
-static int init_crc_table_data(AVCodecContext *avctx)
-{
-    int err;
-    VulkanEncodeFFv1Context *fv = avctx->priv_data;
-
-    uint32_t *buf_mapped;
-    size_t buf_len = 256*sizeof(int32_t);
-
-    RET(ff_vk_create_buf(&fv->s, &fv->crc_tab_buf,
-                         buf_len,
-                         NULL, NULL,
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT));
-    RET(ff_vk_map_buffer(&fv->s, &fv->crc_tab_buf, (void *)&buf_mapped, 0));
-
-    memcpy(buf_mapped, av_crc_get_table(AV_CRC_32_IEEE), buf_len);
-
-    RET(ff_vk_unmap_buffer(&fv->s, &fv->crc_tab_buf, 1));
-    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
-                                        &fv->enc, 0, 2, 0,
-                                        &fv->crc_tab_buf,
-                                        0, fv->crc_tab_buf.size,
-                                        VK_FORMAT_UNDEFINED));
-
-fail:
-    return err;
-}
-
 static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
 {
     int err;
@@ -1719,19 +1615,49 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
     spv->uninit(&spv);
 
     /* Range coder data */
-    err = init_state_transition_data(avctx);
+    err = ff_ffv1_vk_init_state_transition_data(&fv->s,
+                                                &fv->rangecoder_static_buf,
+                                                f);
     if (err < 0)
         return err;
 
     /* Quantization table data */
-    err = init_quant_table_data(avctx);
+    err = ff_ffv1_vk_init_quant_table_data(&fv->s,
+                                           &fv->quant_buf,
+                                           f);
     if (err < 0)
         return err;
 
     /* CRC table buffer */
-    err = init_crc_table_data(avctx);
+    err = ff_ffv1_vk_init_crc_table_data(&fv->s,
+                                         &fv->crc_tab_buf,
+                                         f);
     if (err < 0)
         return err;
+
+    /* Update setup global descriptors */
+    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
+                                        &fv->setup, 0, 0, 0,
+                                        &fv->rangecoder_static_buf,
+                                        0, fv->rangecoder_static_buf.size,
+                                        VK_FORMAT_UNDEFINED));
+
+    /* Update encode global descriptors */
+    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
+                                        &fv->enc, 0, 0, 0,
+                                        &fv->rangecoder_static_buf,
+                                        0, fv->rangecoder_static_buf.size,
+                                        VK_FORMAT_UNDEFINED));
+    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
+                                        &fv->enc, 0, 1, 0,
+                                        &fv->quant_buf,
+                                        0, fv->quant_buf.size,
+                                        VK_FORMAT_UNDEFINED));
+    RET(ff_vk_shader_update_desc_buffer(&fv->s, &fv->exec_pool.contexts[0],
+                                        &fv->enc, 0, 2, 0,
+                                        &fv->crc_tab_buf,
+                                        0, fv->crc_tab_buf.size,
+                                        VK_FORMAT_UNDEFINED));
 
     /* Temporary frame */
     fv->frame = av_frame_alloc();
@@ -1751,7 +1677,8 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
     if (!fv->buf_regions)
         return AVERROR(ENOMEM);
 
-    return 0;
+fail:
+    return err;
 }
 
 static av_cold int vulkan_encode_ffv1_close(AVCodecContext *avctx)
