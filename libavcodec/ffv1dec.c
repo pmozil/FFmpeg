@@ -446,6 +446,11 @@ static int read_extra_header(FFV1Context *f)
     if (f->ac == AC_RANGE_CUSTOM_TAB) {
         for (int i = 1; i < 256; i++)
             f->state_transition[i] = get_symbol(&c, state, 1) + c.one_state[i];
+    } else {
+        RangeCoder rc;
+        ff_build_rac_states(&rc, 0.05 * (1LL << 32), 256 - 8);
+        for (int i = 1; i < 256; i++)
+            f->state_transition[i] = rc.one_state[i];
     }
 
     f->colorspace                 = get_symbol(&c, state, 0); //YUV cs type
@@ -576,6 +581,11 @@ static int read_header(FFV1Context *f, RangeCoder *c)
                 }
                 f->state_transition[i] = st;
             }
+        } else {
+            RangeCoder rc;
+            ff_build_rac_states(&rc, 0.05 * (1LL << 32), 256 - 8);
+            for (int i = 1; i < 256; i++)
+                f->state_transition[i] = rc.one_state[i];
         }
 
         colorspace          = get_symbol(c, state, 0); //YUV cs type
