@@ -29,34 +29,36 @@
 #include "hwcontext.h"
 
 static const AVSideDataDescriptor sd_props[] = {
-    [AV_FRAME_DATA_PANSCAN]                     = { "AVPanScan" },
+    [AV_FRAME_DATA_PANSCAN]                     = { "AVPanScan",                                    AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
     [AV_FRAME_DATA_A53_CC]                      = { "ATSC A53 Part 4 Closed Captions" },
-    [AV_FRAME_DATA_MATRIXENCODING]              = { "AVMatrixEncoding" },
-    [AV_FRAME_DATA_DOWNMIX_INFO]                = { "Metadata relevant to a downmix procedure" },
+    [AV_FRAME_DATA_MATRIXENCODING]              = { "AVMatrixEncoding",                             AV_SIDE_DATA_PROP_CHANNEL_DEPENDENT },
+    [AV_FRAME_DATA_DOWNMIX_INFO]                = { "Metadata relevant to a downmix procedure",     AV_SIDE_DATA_PROP_CHANNEL_DEPENDENT },
     [AV_FRAME_DATA_AFD]                         = { "Active format description" },
-    [AV_FRAME_DATA_MOTION_VECTORS]              = { "Motion vectors" },
+    [AV_FRAME_DATA_MOTION_VECTORS]              = { "Motion vectors",                               AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
     [AV_FRAME_DATA_SKIP_SAMPLES]                = { "Skip samples" },
     [AV_FRAME_DATA_GOP_TIMECODE]                = { "GOP timecode" },
     [AV_FRAME_DATA_S12M_TIMECODE]               = { "SMPTE 12-1 timecode" },
-    [AV_FRAME_DATA_DYNAMIC_HDR_PLUS]            = { "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)" },
-    [AV_FRAME_DATA_DYNAMIC_HDR_VIVID]           = { "HDR Dynamic Metadata CUVA 005.1 2021 (Vivid)" },
-    [AV_FRAME_DATA_REGIONS_OF_INTEREST]         = { "Regions Of Interest" },
+    [AV_FRAME_DATA_DYNAMIC_HDR_PLUS]            = { "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)",   AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
+    [AV_FRAME_DATA_DYNAMIC_HDR_VIVID]           = { "HDR Dynamic Metadata CUVA 005.1 2021 (Vivid)", AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
+    [AV_FRAME_DATA_REGIONS_OF_INTEREST]         = { "Regions Of Interest",                          AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
     [AV_FRAME_DATA_VIDEO_ENC_PARAMS]            = { "Video encoding parameters" },
     [AV_FRAME_DATA_FILM_GRAIN_PARAMS]           = { "Film grain parameters" },
-    [AV_FRAME_DATA_DETECTION_BBOXES]            = { "Bounding boxes for object detection and classification" },
-    [AV_FRAME_DATA_DOVI_RPU_BUFFER]             = { "Dolby Vision RPU Data" },
-    [AV_FRAME_DATA_DOVI_METADATA]               = { "Dolby Vision Metadata" },
-    [AV_FRAME_DATA_LCEVC]                       = { "LCEVC NAL data" },
+    [AV_FRAME_DATA_DETECTION_BBOXES]            = { "Bounding boxes for object detection and classification", AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
+    [AV_FRAME_DATA_DOVI_RPU_BUFFER]             = { "Dolby Vision RPU Data",                        AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
+    [AV_FRAME_DATA_DOVI_METADATA]               = { "Dolby Vision Metadata",                        AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
+    [AV_FRAME_DATA_LCEVC]                       = { "LCEVC NAL data",                               AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
+    [AV_FRAME_DATA_VIEW_ID]                     = { "View ID" },
     [AV_FRAME_DATA_STEREO3D]                    = { "Stereo 3D",                                    AV_SIDE_DATA_PROP_GLOBAL },
     [AV_FRAME_DATA_REPLAYGAIN]                  = { "AVReplayGain",                                 AV_SIDE_DATA_PROP_GLOBAL },
     [AV_FRAME_DATA_DISPLAYMATRIX]               = { "3x3 displaymatrix",                            AV_SIDE_DATA_PROP_GLOBAL },
     [AV_FRAME_DATA_AUDIO_SERVICE_TYPE]          = { "Audio service type",                           AV_SIDE_DATA_PROP_GLOBAL },
-    [AV_FRAME_DATA_MASTERING_DISPLAY_METADATA]  = { "Mastering display metadata",                   AV_SIDE_DATA_PROP_GLOBAL },
-    [AV_FRAME_DATA_CONTENT_LIGHT_LEVEL]         = { "Content light level metadata",                 AV_SIDE_DATA_PROP_GLOBAL },
+    [AV_FRAME_DATA_MASTERING_DISPLAY_METADATA]  = { "Mastering display metadata",                   AV_SIDE_DATA_PROP_GLOBAL | AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
+    [AV_FRAME_DATA_CONTENT_LIGHT_LEVEL]         = { "Content light level metadata",                 AV_SIDE_DATA_PROP_GLOBAL | AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
     [AV_FRAME_DATA_AMBIENT_VIEWING_ENVIRONMENT] = { "Ambient viewing environment",                  AV_SIDE_DATA_PROP_GLOBAL },
-    [AV_FRAME_DATA_SPHERICAL]                   = { "Spherical Mapping",                            AV_SIDE_DATA_PROP_GLOBAL },
-    [AV_FRAME_DATA_ICC_PROFILE]                 = { "ICC profile",                                  AV_SIDE_DATA_PROP_GLOBAL },
+    [AV_FRAME_DATA_SPHERICAL]                   = { "Spherical Mapping",                            AV_SIDE_DATA_PROP_GLOBAL | AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
+    [AV_FRAME_DATA_ICC_PROFILE]                 = { "ICC profile",                                  AV_SIDE_DATA_PROP_GLOBAL | AV_SIDE_DATA_PROP_COLOR_DEPENDENT },
     [AV_FRAME_DATA_SEI_UNREGISTERED]            = { "H.26[45] User Data Unregistered SEI message",  AV_SIDE_DATA_PROP_MULTI },
+    [AV_FRAME_DATA_VIDEO_HINT]                  = { "Encoding video hint",                          AV_SIDE_DATA_PROP_SIZE_DEPENDENT },
 };
 
 static void get_frame_defaults(AVFrame *frame)
@@ -172,10 +174,10 @@ void av_frame_free(AVFrame **frame)
 static int get_video_buffer(AVFrame *frame, int align)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
-    int ret, padded_height, total_size;
-    int plane_padding = FFMAX(16 + 16/*STRIDE_ALIGN*/, align);
+    int ret, padded_height;
+    int plane_padding;
     ptrdiff_t linesizes[4];
-    size_t sizes[4];
+    size_t total_size, sizes[4];
 
     if (!desc)
         return AVERROR(EINVAL);
@@ -183,10 +185,11 @@ static int get_video_buffer(AVFrame *frame, int align)
     if ((ret = av_image_check_size(frame->width, frame->height, 0, NULL)) < 0)
         return ret;
 
-    if (!frame->linesize[0]) {
-        if (align <= 0)
-            align = ALIGN;
+    if (align <= 0)
+        align = ALIGN;
+    plane_padding = FFMAX(ALIGN, align);
 
+    if (!frame->linesize[0]) {
         for (int i = 1; i <= align; i += i) {
             ret = av_image_fill_linesizes(frame->linesize, frame->format,
                                           FFALIGN(frame->width, i));
@@ -208,9 +211,9 @@ static int get_video_buffer(AVFrame *frame, int align)
                                          padded_height, linesizes)) < 0)
         return ret;
 
-    total_size = 4*plane_padding;
+    total_size = 4 * plane_padding + 4 * align;
     for (int i = 0; i < 4; i++) {
-        if (sizes[i] > INT_MAX - total_size)
+        if (sizes[i] > SIZE_MAX - total_size)
             return AVERROR(EINVAL);
         total_size += sizes[i];
     }
@@ -228,6 +231,7 @@ static int get_video_buffer(AVFrame *frame, int align)
     for (int i = 1; i < 4; i++) {
         if (frame->data[i])
             frame->data[i] += i * plane_padding;
+        frame->data[i] = (uint8_t *)FFALIGN((uintptr_t)frame->data[i], align);
     }
 
     frame->extended_data = frame->data;
@@ -242,6 +246,7 @@ static int get_audio_buffer(AVFrame *frame, int align)
 {
     int planar   = av_sample_fmt_is_planar(frame->format);
     int channels, planes;
+    size_t size;
     int ret;
 
     channels = frame->ch_layout.nb_channels;
@@ -253,6 +258,9 @@ static int get_audio_buffer(AVFrame *frame, int align)
         if (ret < 0)
             return ret;
     }
+
+    if (align <= 0)
+        align = ALIGN;
 
     if (planes > AV_NUM_DATA_POINTERS) {
         frame->extended_data = av_calloc(planes,
@@ -268,21 +276,27 @@ static int get_audio_buffer(AVFrame *frame, int align)
     } else
         frame->extended_data = frame->data;
 
+    if (frame->linesize[0] > SIZE_MAX - align)
+        return AVERROR(EINVAL);
+    size = frame->linesize[0] + (size_t)align;
+
     for (int i = 0; i < FFMIN(planes, AV_NUM_DATA_POINTERS); i++) {
-        frame->buf[i] = av_buffer_alloc(frame->linesize[0]);
+        frame->buf[i] = av_buffer_alloc(size);
         if (!frame->buf[i]) {
             av_frame_unref(frame);
             return AVERROR(ENOMEM);
         }
-        frame->extended_data[i] = frame->data[i] = frame->buf[i]->data;
+        frame->extended_data[i] = frame->data[i] =
+            (uint8_t *)FFALIGN((uintptr_t)frame->buf[i]->data, align);
     }
     for (int i = 0; i < planes - AV_NUM_DATA_POINTERS; i++) {
-        frame->extended_buf[i] = av_buffer_alloc(frame->linesize[0]);
+        frame->extended_buf[i] = av_buffer_alloc(size);
         if (!frame->extended_buf[i]) {
             av_frame_unref(frame);
             return AVERROR(ENOMEM);
         }
-        frame->extended_data[i + AV_NUM_DATA_POINTERS] = frame->extended_buf[i]->data;
+        frame->extended_data[i + AV_NUM_DATA_POINTERS] =
+            (uint8_t *)FFALIGN((uintptr_t)frame->extended_buf[i]->data, align);
     }
     return 0;
 
@@ -854,21 +868,20 @@ AVFrameSideData *av_frame_side_data_add(AVFrameSideData ***sd, int *nb_sd,
     AVFrameSideData *sd_dst  = NULL;
     AVBufferRef *buf = *pbuf;
 
+    if ((flags & AV_FRAME_SIDE_DATA_FLAG_NEW_REF) && !(buf = av_buffer_ref(*pbuf)))
+        return NULL;
     if (flags & AV_FRAME_SIDE_DATA_FLAG_UNIQUE)
         remove_side_data(sd, nb_sd, type);
     if ((!desc || !(desc->props & AV_SIDE_DATA_PROP_MULTI)) &&
         (sd_dst = (AVFrameSideData *)av_frame_side_data_get(*sd, *nb_sd, type))) {
         sd_dst = replace_side_data_from_buf(sd_dst, buf, flags);
-        if (sd_dst)
-            *pbuf = NULL;
-        return sd_dst;
-    }
+    } else
+        sd_dst = add_side_data_from_buf(sd, nb_sd, type, buf);
 
-    sd_dst = add_side_data_from_buf(sd, nb_sd, type, buf);
-    if (!sd_dst)
-        return NULL;
-
-    *pbuf = NULL;
+    if (sd_dst && !(flags & AV_FRAME_SIDE_DATA_FLAG_NEW_REF))
+        *pbuf = NULL;
+    else if (!sd_dst && (flags & AV_FRAME_SIDE_DATA_FLAG_NEW_REF))
+        av_buffer_unref(&buf);
     return sd_dst;
 }
 
@@ -945,6 +958,22 @@ void av_frame_side_data_remove(AVFrameSideData ***sd, int *nb_sd,
                                enum AVFrameSideDataType type)
 {
     remove_side_data(sd, nb_sd, type);
+}
+
+void av_frame_side_data_remove_by_props(AVFrameSideData ***sd, int *nb_sd,
+                                        int props)
+{
+    for (int i = *nb_sd - 1; i >= 0; i--) {
+        AVFrameSideData *entry = ((*sd)[i]);
+        const AVSideDataDescriptor *desc = av_frame_side_data_desc(entry->type);
+        if (!desc || !(desc->props & props))
+            continue;
+
+        free_side_data(&entry);
+
+        ((*sd)[i]) = ((*sd)[*nb_sd - 1]);
+        (*nb_sd)--;
+    }
 }
 
 AVFrameSideData *av_frame_get_side_data(const AVFrame *frame,
@@ -1066,6 +1095,7 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
 {
     const AVPixFmtDescriptor *desc;
     size_t offsets[4];
+    int ret;
 
     if (!(frame->width > 0 && frame->height > 0))
         return AVERROR(EINVAL);
@@ -1093,7 +1123,9 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
     }
 
     /* calculate the offsets for each plane */
-    calc_cropping_offsets(offsets, frame, desc);
+    ret = calc_cropping_offsets(offsets, frame, desc);
+    if (ret < 0)
+        return ret;
 
     /* adjust the offsets to avoid breaking alignment */
     if (!(flags & AV_FRAME_CROP_UNALIGNED)) {
@@ -1112,7 +1144,9 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
 
         if (min_log2_align < 5 && log2_crop_align != INT_MAX) {
             frame->crop_left &= ~((1 << (5 + log2_crop_align - min_log2_align)) - 1);
-            calc_cropping_offsets(offsets, frame, desc);
+            ret = calc_cropping_offsets(offsets, frame, desc);
+            if (ret < 0)
+                return ret;
         }
     }
 

@@ -50,8 +50,8 @@ Miscellaneous Areas
 ===================
 
 documentation                           Stefano Sabatini, Mike Melanson, Timothy Gu, Gyan Doshi
-project server day to day operations    (L: root@ffmpeg.org) Árpád Gereöffy, Michael Niedermayer, Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
-project server emergencies              (L: root@ffmpeg.org) Árpád Gereöffy, Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
+project server day to day operations    (L: root@ffmpeg.org) Michael Niedermayer, Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
+project server emergencies              (L: root@ffmpeg.org) Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
 presets                             [0]
 metadata subsystem                      Aurelien Jacobs
 release management                      Michael Niedermayer
@@ -60,8 +60,7 @@ API tests                           [0]
 
 Communication
 =============
-
-website                                 (S: https://git.ffmpeg.org/ffmpeg-web) Deby Barbara Lepage
+website                                 (T: https://git.ffmpeg.org/ffmpeg-web) Deby Barbara Lepage
 fate.ffmpeg.org                         (L: fate-admin@ffmpeg.org) (W: https://fate.ffmpeg.org) (P: https://ffmpeg.org/fate.html) (S: https://git.ffmpeg.org/fateserver) Timo Rothenpieler
 Trac bug tracker                        (W: https://trac.ffmpeg.org) Alexander Strasser, Michael Niedermayer, Carl Eugen Hoyos
 Patchwork                           [2] (W: https://patchwork.ffmpeg.org) Andriy Gelman
@@ -83,6 +82,7 @@ Other:
   aes_ctr.c, aes_ctr.h                  Eran Kornblau
   bprint                                Nicolas George
   bswap.h
+  csp.c, csp.h                          Leo Izen, Ronald S. Bultje
   des                                   Reimar Doeffinger
   dynarray.h                            Nicolas George
   eval.c, eval.h                    [2] Michael Niedermayer
@@ -207,7 +207,6 @@ Codecs:
   libgsm.c                              Michel Bardiaux
   libkvazaar.c                          Arttu Ylä-Outinen
   libopenh264enc.c                      Martin Storsjo, Linjie Fu
-  libopenjpeg.c                         Jaikrishnan Menon
   libopenjpegenc.c                      Michael Bradshaw
   libtheoraenc.c                        David Conrad
   libvorbis.c                           David Conrad
@@ -392,7 +391,7 @@ Muxers/Demuxers:
   dss.c                                 Oleksij Rempel
   dtsdec.c                              foo86
   dv.c                                  Roman Shaposhnik
-  dvdvideodec.c                         Marth64
+  dvdvideodec.c                     [2] Marth64
   electronicarts.c                      Peter Ross
   evc*                                  Samsung (Dawid Kozinski)
   ffm*                                  Baptiste Coudurier
@@ -446,7 +445,8 @@ Muxers/Demuxers:
   pva.c                                 Ivo van Poorten
   r3d.c                                 Baptiste Coudurier
   raw.c                                 Michael Niedermayer
-  rcwtenc.c                             Marth64
+  rcwtdec.c                         [2] Marth64
+  rcwtenc.c                         [2] Marth64
   rdt.c                                 Ronald S. Bultje
   rl2.c                                 Sascha Sommer
   rmdec.c, rmenc.c                      Ronald S. Bultje
@@ -512,9 +512,10 @@ Operating systems / CPU architectures
 Alpha                               [0]
 MIPS                                    Manojkumar Bhosale, Shiyou Yin
 LoongArch                           [2] Shiyou Yin
-Mac OS X / PowerPC                      Romain Dolbeau, Guillaume Poirier
+Darwin (macOS, iOS)                 [2] Marvin Scholz
+Mac OS X / PowerPC                  [0]
 Amiga / PowerPC                         Colin Ward
-Linux / PowerPC                         Lauri Kasanen
+Linux / PowerPC                     [1] Lauri Kasanen
 RISC-V                              [2] Rémi Denis-Courmont
 Windows MinGW                           Alex Beregszaszi, Ramiro Polla
 Windows Cygwin                          Victor Paesa

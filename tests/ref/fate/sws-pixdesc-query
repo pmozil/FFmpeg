@@ -7,10 +7,16 @@ is16BPS:
   bgra64le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrp16be
   gbrp16le
+  gbrpf16be
+  gbrpf16le
   gray16be
   gray16le
+  grayf16be
+  grayf16le
   p016be
   p016le
   p216be
@@ -23,6 +29,12 @@ is16BPS:
   rgba64le
   rgbaf16be
   rgbaf16le
+  rgbf16be
+  rgbf16le
+  xv48be
+  xv48le
+  y216be
+  y216le
   ya16be
   ya16le
   yuv420p16be
@@ -75,6 +87,8 @@ isNBPS:
   p410le
   p412be
   p412le
+  v30xbe
+  v30xle
   x2bgr10be
   x2bgr10le
   x2rgb10be
@@ -149,18 +163,21 @@ isBE:
   gbrap12be
   gbrap14be
   gbrap16be
+  gbrapf16be
   gbrapf32be
   gbrp10be
   gbrp12be
   gbrp14be
   gbrp16be
   gbrp9be
+  gbrpf16be
   gbrpf32be
   gray10be
   gray12be
   gray14be
   gray16be
   gray9be
+  grayf16be
   grayf32be
   nv20be
   p010be
@@ -176,17 +193,23 @@ isBE:
   rgb48be
   rgb555be
   rgb565be
+  rgb96be
+  rgba128be
   rgba64be
   rgbaf16be
   rgbaf32be
+  rgbf16be
   rgbf32be
+  v30xbe
   x2bgr10be
   x2rgb10be
   xv30be
   xv36be
+  xv48be
   xyz12be
   y210be
   y212be
+  y216be
   ya16be
   yuv420p10be
   yuv420p12be
@@ -218,6 +241,7 @@ isBE:
   yuva444p9be
 
 isYUV:
+  ayuv
   ayuv64be
   ayuv64le
   nv12
@@ -245,20 +269,28 @@ isYUV:
   p412le
   p416be
   p416le
+  uyva
   uyvy422
   uyyvyy411
+  v30xbe
+  v30xle
   vuya
   vuyx
+  vyu444
   xv30be
   xv30le
   xv36be
   xv36le
+  xv48be
+  xv48le
   xyz12be
   xyz12le
   y210be
   y210le
   y212be
   y212le
+  y216be
+  y216le
   ya16be
   ya16le
   ya8
@@ -500,6 +532,8 @@ isRGB:
   gbrap14le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrapf32be
   gbrapf32le
   gbrp
@@ -513,6 +547,8 @@ isRGB:
   gbrp16le
   gbrp9be
   gbrp9le
+  gbrpf16be
+  gbrpf16le
   gbrpf32be
   gbrpf32le
   rgb0
@@ -530,12 +566,18 @@ isRGB:
   rgb565be
   rgb565le
   rgb8
+  rgb96be
+  rgb96le
+  rgba128be
+  rgba128le
   rgba64be
   rgba64le
   rgbaf16be
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  rgbf16be
+  rgbf16le
   rgbf32be
   rgbf32le
   x2bgr10be
@@ -555,6 +597,8 @@ Gray:
   gray16le
   gray9be
   gray9le
+  grayf16be
+  grayf16le
   grayf32be
   grayf32le
   ya16be
@@ -656,6 +700,8 @@ AnyRGB:
   gbrap14le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrapf32be
   gbrapf32le
   gbrp
@@ -669,6 +715,8 @@ AnyRGB:
   gbrp16le
   gbrp9be
   gbrp9le
+  gbrpf16be
+  gbrpf16le
   gbrpf32be
   gbrpf32le
   monob
@@ -688,12 +736,18 @@ AnyRGB:
   rgb565be
   rgb565le
   rgb8
+  rgb96be
+  rgb96le
+  rgba128be
+  rgba128le
   rgba64be
   rgba64le
   rgbaf16be
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  rgbf16be
+  rgbf16le
   rgbf32be
   rgbf32le
   x2bgr10be
@@ -702,6 +756,7 @@ AnyRGB:
   x2rgb10le
 
 ALPHA:
+  ayuv
   ayuv64be
   ayuv64le
   bgr32
@@ -717,17 +772,22 @@ ALPHA:
   gbrap14le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrapf32be
   gbrapf32le
   pal8
   rgb32
   rgb32_1
+  rgba128be
+  rgba128le
   rgba64be
   rgba64le
   rgbaf16be
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  uyva
   vuya
   ya16be
   ya16le
@@ -761,6 +821,7 @@ ALPHA:
 Packed:
   0bgr
   0rgb
+  ayuv
   ayuv64be
   ayuv64le
   bayer_bggr16be
@@ -810,18 +871,28 @@ Packed:
   rgb565be
   rgb565le
   rgb8
+  rgb96be
+  rgb96le
+  rgba128be
+  rgba128le
   rgba64be
   rgba64le
   rgbaf16be
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  rgbf16be
+  rgbf16le
   rgbf32be
   rgbf32le
+  uyva
   uyvy422
   uyyvyy411
+  v30xbe
+  v30xle
   vuya
   vuyx
+  vyu444
   x2bgr10be
   x2bgr10le
   x2rgb10be
@@ -830,12 +901,16 @@ Packed:
   xv30le
   xv36be
   xv36le
+  xv48be
+  xv48le
   xyz12be
   xyz12le
   y210be
   y210le
   y212be
   y212le
+  y216be
+  y216le
   ya16be
   ya16le
   ya8
@@ -852,6 +927,8 @@ Planar:
   gbrap14le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrapf32be
   gbrapf32le
   gbrp
@@ -865,6 +942,8 @@ Planar:
   gbrp16le
   gbrp9be
   gbrp9le
+  gbrpf16be
+  gbrpf16le
   gbrpf32be
   gbrpf32le
   nv12
@@ -1010,12 +1089,18 @@ PackedRGB:
   rgb565be
   rgb565le
   rgb8
+  rgb96be
+  rgb96le
+  rgba128be
+  rgba128le
   rgba64be
   rgba64le
   rgbaf16be
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  rgbf16be
+  rgbf16le
   rgbf32be
   rgbf32le
   x2bgr10be
@@ -1033,6 +1118,8 @@ PlanarRGB:
   gbrap14le
   gbrap16be
   gbrap16le
+  gbrapf16be
+  gbrapf16le
   gbrapf32be
   gbrapf32le
   gbrp
@@ -1046,6 +1133,8 @@ PlanarRGB:
   gbrp16le
   gbrp9be
   gbrp9le
+  gbrpf16be
+  gbrpf16le
   gbrpf32be
   gbrpf32le
 
@@ -1084,5 +1173,6 @@ SwappedChroma:
   nv42
   vuya
   vuyx
+  vyu444
   yvyu422
 

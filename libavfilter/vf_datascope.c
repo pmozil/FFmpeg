@@ -77,9 +77,12 @@ static const AVOption datascope_options[] = {
 
 AVFILTER_DEFINE_CLASS(datascope);
 
-static int query_formats(AVFilterContext *ctx)
+static int query_formats(const AVFilterContext *ctx,
+                         AVFilterFormatsConfig **cfg_in,
+                         AVFilterFormatsConfig **cfg_out)
 {
-    return ff_set_common_formats(ctx, ff_draw_supported_pixel_formats(0));
+    return ff_set_common_formats2(ctx, cfg_in, cfg_out,
+                                  ff_draw_supported_pixel_formats(0));
 }
 
 static void draw_text(FFDrawContext *draw, AVFrame *frame, FFDrawColor *color,
@@ -448,15 +451,15 @@ static const AVFilterPad outputs[] = {
     },
 };
 
-const AVFilter ff_vf_datascope = {
-    .name          = "datascope",
-    .description   = NULL_IF_CONFIG_SMALL("Video data analysis."),
+const FFFilter ff_vf_datascope = {
+    .p.name        = "datascope",
+    .p.description = NULL_IF_CONFIG_SMALL("Video data analysis."),
+    .p.priv_class  = &datascope_class,
+    .p.flags       = AVFILTER_FLAG_SLICE_THREADS,
     .priv_size     = sizeof(DatascopeContext),
-    .priv_class    = &datascope_class,
     FILTER_INPUTS(inputs),
     FILTER_OUTPUTS(outputs),
-    FILTER_QUERY_FUNC(query_formats),
-    .flags         = AVFILTER_FLAG_SLICE_THREADS,
+    FILTER_QUERY_FUNC2(query_formats),
     .process_command = process_command,
 };
 
@@ -728,15 +731,15 @@ static const AVFilterPad pixscope_inputs[] = {
     },
 };
 
-const AVFilter ff_vf_pixscope = {
-    .name          = "pixscope",
-    .description   = NULL_IF_CONFIG_SMALL("Pixel data analysis."),
+const FFFilter ff_vf_pixscope = {
+    .p.name        = "pixscope",
+    .p.description = NULL_IF_CONFIG_SMALL("Pixel data analysis."),
+    .p.priv_class  = &pixscope_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     .priv_size     = sizeof(PixscopeContext),
-    .priv_class    = &pixscope_class,
     FILTER_INPUTS(pixscope_inputs),
     FILTER_OUTPUTS(ff_video_default_filterpad),
-    FILTER_QUERY_FUNC(query_formats),
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
+    FILTER_QUERY_FUNC2(query_formats),
     .process_command = pixscope_process_command,
 };
 
@@ -1126,15 +1129,15 @@ static const AVFilterPad oscilloscope_inputs[] = {
     },
 };
 
-const AVFilter ff_vf_oscilloscope = {
-    .name          = "oscilloscope",
-    .description   = NULL_IF_CONFIG_SMALL("2D Video Oscilloscope."),
+const FFFilter ff_vf_oscilloscope = {
+    .p.name        = "oscilloscope",
+    .p.description = NULL_IF_CONFIG_SMALL("2D Video Oscilloscope."),
+    .p.priv_class  = &oscilloscope_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     .priv_size     = sizeof(OscilloscopeContext),
-    .priv_class    = &oscilloscope_class,
     .uninit        = oscilloscope_uninit,
     FILTER_INPUTS(oscilloscope_inputs),
     FILTER_OUTPUTS(ff_video_default_filterpad),
-    FILTER_QUERY_FUNC(query_formats),
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
+    FILTER_QUERY_FUNC2(query_formats),
     .process_command = oscilloscope_process_command,
 };

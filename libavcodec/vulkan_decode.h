@@ -29,6 +29,7 @@
 typedef struct FFVulkanDecodeDescriptor {
     enum AVCodecID                   codec_id;
     FFVulkanExtensions               decode_extension;
+    VkQueueFlagBits                  queue_flags;
     VkVideoCodecOperationFlagBitsKHR decode_op;
 
     VkExtensionProperties ext_props;
@@ -46,7 +47,8 @@ typedef struct FFVulkanDecodeProfileData {
 typedef struct FFVulkanDecodeShared {
     FFVulkanContext s;
     FFVkVideoCommon common;
-    FFVkQueueFamilyCtx qf;
+    AVVulkanDeviceQueueFamily *qf;
+    FFVkExecPool exec_pool;
 
     AVBufferPool *buf_pool;
 
@@ -54,12 +56,14 @@ typedef struct FFVulkanDecodeShared {
     VkVideoDecodeCapabilitiesKHR dec_caps;
 
     VkVideoSessionParametersKHR empty_session_params;
+
+    /* Software-defined decoder context */
+    void *sd_ctx;
 } FFVulkanDecodeShared;
 
 typedef struct FFVulkanDecodeContext {
     FFVulkanDecodeShared *shared_ctx;
     AVBufferRef *session_params;
-    FFVkExecPool exec_pool;
 
     int dedicated_dpb; /* Oddity  #1 - separate DPB images */
     int external_fg;   /* Oddity  #2 - hardware can't apply film grain */
@@ -139,6 +143,13 @@ int ff_vk_params_invalidate(AVCodecContext *avctx, int t, const uint8_t *b, uint
 int ff_vk_decode_prepare_frame(FFVulkanDecodeContext *dec, AVFrame *pic,
                                FFVulkanDecodePicture *vkpic, int is_current,
                                int alloc_dpb);
+
+/**
+ * Software-defined decoder version of ff_vk_decode_prepare_frame.
+ */
+int ff_vk_decode_prepare_frame_sdr(FFVulkanDecodeContext *dec, AVFrame *pic,
+                                   FFVulkanDecodePicture *vkpic, int is_current,
+                                   enum FFVkShaderRepFormat rep_fmt, int alloc_dpb);
 
 /**
  * Add slice data to frame.

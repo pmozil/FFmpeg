@@ -16,13 +16,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVUTIL_VULKAN_SPIRV_H
-#define AVUTIL_VULKAN_SPIRV_H
+#ifndef AVFILTER_VULKAN_SPIRV_H
+#define AVFILTER_VULKAN_SPIRV_H
 
 #include "libavutil/vulkan.h"
 
-#include "config.h"
 #include "vulkan.h"
+#include "config.h"
 
 typedef struct FFVkSPIRVCompiler {
     void *priv;

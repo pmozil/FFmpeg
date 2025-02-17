@@ -66,6 +66,10 @@ typedef struct { CONTEXT c; int status; } checkasm_context;
 #define checkasm_save_context() 0
 #define checkasm_load_context() do {} while (0)
 #endif
+#elif defined(_WASI_EMULATED_SIGNAL)
+#define checkasm_context void*
+#define checkasm_save_context() 0
+#define checkasm_load_context() do {} while (0)
 #else
 #include <setjmp.h>
 typedef sigjmp_buf checkasm_context;
@@ -84,6 +88,7 @@ void checkasm_check_blend(void);
 void checkasm_check_blockdsp(void);
 void checkasm_check_bswapdsp(void);
 void checkasm_check_colorspace(void);
+void checkasm_check_diracdsp(void);
 void checkasm_check_exrdsp(void);
 void checkasm_check_fdctdsp(void);
 void checkasm_check_fixed_dsp(void);
@@ -386,5 +391,17 @@ DECL_CHECKASM_CHECK_FUNC(int32_t);
 #define CONCAT(a,b) PASTE(a,b)
 
 #define checkasm_check(prefix, ...) CONCAT(checkasm_check_, prefix)(__FILE__, __LINE__, __VA_ARGS__)
+
+/* This assumes that there is a local variable named "bit_depth".
+ * For tests that don't have that and only operate on a single
+ * bitdepth, just call checkasm_check(uint8_t, ...) directly. */
+#define checkasm_check_pixel(buf1, stride1, buf2, stride2, ...) \
+    ((bit_depth > 8) ?                                          \
+     checkasm_check(uint16_t, (const uint16_t*)buf1, stride1,   \
+                              (const uint16_t*)buf2, stride2,   \
+                              __VA_ARGS__) :                    \
+     checkasm_check(uint8_t,  (const uint8_t*) buf1, stride1,   \
+                              (const uint8_t*) buf2, stride2,   \
+                              __VA_ARGS__))
 
 #endif /* TESTS_CHECKASM_CHECKASM_H */

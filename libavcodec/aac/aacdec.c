@@ -538,7 +538,9 @@ static av_cold void flush(AVCodecContext *avctx)
         }
     }
 
+#if CONFIG_AAC_DECODER
     ff_aac_usac_reset_state(ac, &ac->oc[1]);
+#endif
 }
 
 /**
@@ -1104,9 +1106,11 @@ static av_cold int decode_close(AVCodecContext *avctx)
         OutputConfiguration *oc = &ac->oc[i];
         AACUSACConfig *usac = &oc->usac;
         for (int j = 0; j < usac->nb_elems; j++) {
-            AACUsacElemConfig *ec = &usac->elems[i];
+            AACUsacElemConfig *ec = &usac->elems[j];
             av_freep(&ec->ext.pl_data);
         }
+
+        av_channel_layout_uninit(&ac->oc[i].ch_layout);
     }
 
     for (int type = 0; type < FF_ARRAY_ELEMS(ac->che); type++) {
@@ -2194,6 +2198,7 @@ static int aac_decode_er_frame(AVCodecContext *avctx, AVFrame *frame,
 
     ac->frame->nb_samples = samples;
     ac->frame->sample_rate = avctx->sample_rate;
+    ac->frame->flags |= AV_FRAME_FLAG_KEY;
     *got_frame_ptr = 1;
 
     skip_bits_long(gb, get_bits_left(gb));
@@ -2354,6 +2359,7 @@ static int decode_frame_ga(AVCodecContext *avctx, AACDecContext *ac,
     if (samples) {
         ac->frame->nb_samples = samples;
         ac->frame->sample_rate = avctx->sample_rate;
+        ac->frame->flags |= AV_FRAME_FLAG_KEY;
         *got_frame_ptr = 1;
     } else {
         av_frame_unref(ac->frame);

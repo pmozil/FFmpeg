@@ -19,6 +19,7 @@ HEADERS = adler32.h                                                     \
           camellia.h                                                    \
           channel_layout.h                                              \
           common.h                                                      \
+          container_fifo.h                                              \
           cpu.h                                                         \
           crc.h                                                         \
           csp.h                                                         \
@@ -34,6 +35,7 @@ HEADERS = adler32.h                                                     \
           executor.h                                                    \
           fifo.h                                                        \
           file.h                                                        \
+          film_grain_params.h                                           \
           frame.h                                                       \
           hash.h                                                        \
           hdr_dynamic_metadata.h                                        \
@@ -45,6 +47,7 @@ HEADERS = adler32.h                                                     \
           hwcontext_d3d12va.h                                           \
           hwcontext_drm.h                                               \
           hwcontext_dxva2.h                                             \
+          hwcontext_amf.h                                               \
           hwcontext_qsv.h                                               \
           hwcontext_mediacodec.h                                        \
           hwcontext_opencl.h                                            \
@@ -74,6 +77,7 @@ HEADERS = adler32.h                                                     \
           random_seed.h                                                 \
           rc4.h                                                         \
           rational.h                                                    \
+          refstruct.h                                                   \
           replaygain.h                                                  \
           ripemd.h                                                      \
           samplefmt.h                                                   \
@@ -93,7 +97,6 @@ HEADERS = adler32.h                                                     \
           xtea.h                                                        \
           tea.h                                                         \
           tx.h                                                          \
-          film_grain_params.h                                           \
           video_hint.h
 
 ARCH_HEADERS = bswap.h                                                  \
@@ -118,6 +121,7 @@ OBJS = adler32.o                                                        \
        cast5.o                                                          \
        camellia.o                                                       \
        channel_layout.o                                                 \
+       container_fifo.o                                                 \
        cpu.o                                                            \
        crc.o                                                            \
        csp.o                                                            \
@@ -135,6 +139,7 @@ OBJS = adler32.o                                                        \
        file.o                                                           \
        file_open.o                                                      \
        float_dsp.o                                                      \
+       film_grain_params.o                                              \
        fixed_dsp.o                                                      \
        frame.o                                                          \
        hash.o                                                           \
@@ -162,6 +167,7 @@ OBJS = adler32.o                                                        \
        pixelutils.o                                                     \
        random_seed.o                                                    \
        rational.o                                                       \
+       refstruct.o                                                      \
        reverse.o                                                        \
        rc4.o                                                            \
        ripemd.o                                                         \
@@ -189,13 +195,13 @@ OBJS = adler32.o                                                        \
        version.o                                                        \
        video_enc_params.o                                               \
        video_hint.o                                                     \
-       film_grain_params.o                                              \
 
 
 OBJS-$(CONFIG_CUDA)                     += hwcontext_cuda.o
 OBJS-$(CONFIG_D3D11VA)                  += hwcontext_d3d11va.o
 OBJS-$(CONFIG_D3D12VA)                  += hwcontext_d3d12va.o
 OBJS-$(CONFIG_DXVA2)                    += hwcontext_dxva2.o
+OBJS-$(CONFIG_AMF)                      += hwcontext_amf.o
 OBJS-$(CONFIG_LIBDRM)                   += hwcontext_drm.o
 OBJS-$(CONFIG_MACOS_KPERF)              += macos_kperf.o
 OBJS-$(CONFIG_MEDIACODEC)               += hwcontext_mediacodec.o
@@ -224,6 +230,8 @@ SKIPHEADERS-$(CONFIG_CUDA)             += hwcontext_cuda_internal.h     \
 SKIPHEADERS-$(CONFIG_D3D11VA)          += hwcontext_d3d11va.h
 SKIPHEADERS-$(CONFIG_D3D12VA)          += hwcontext_d3d12va.h
 SKIPHEADERS-$(CONFIG_DXVA2)            += hwcontext_dxva2.h
+SKIPHEADERS-$(CONFIG_AMF)              += hwcontext_amf.h               \
+                                          hwcontext_amf_internal.h
 SKIPHEADERS-$(CONFIG_QSV)              += hwcontext_qsv.h
 SKIPHEADERS-$(CONFIG_OPENCL)           += hwcontext_opencl.h
 SKIPHEADERS-$(CONFIG_VAAPI)            += hwcontext_vaapi.h
@@ -232,6 +240,8 @@ SKIPHEADERS-$(CONFIG_VDPAU)            += hwcontext_vdpau.h
 SKIPHEADERS-$(CONFIG_VULKAN)           += hwcontext_vulkan.h vulkan.h   \
                                           vulkan_functions.h            \
                                           vulkan_loader.h
+SKIPHEADERS-$(CONFIG_LIBSHADERC)       += vulkan_spirv.h
+SKIPHEADERS-$(CONFIG_LIBGLSLANG)       += vulkan_spirv.h
 
 TESTPROGS = adler32                                                     \
             aes                                                         \

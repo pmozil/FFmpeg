@@ -94,6 +94,12 @@
 #define isatty(fd) 1
 #endif
 
+#if ARCH_AARCH64
+#include "libavutil/aarch64/cpu.h"
+#elif ARCH_RISCV
+#include "libavutil/riscv/cpu.h"
+#endif
+
 #if ARCH_ARM && HAVE_ARMV5TE_EXTERNAL
 #include "libavutil/arm/cpu.h"
 
@@ -133,6 +139,9 @@ static const struct {
     #endif
     #if CONFIG_DCA_DECODER
         { "synth_filter", checkasm_check_synth_filter },
+    #endif
+    #if CONFIG_DIRAC_DECODER
+        { "diracdsp", checkasm_check_diracdsp },
     #endif
     #if CONFIG_EXR_DECODER
         { "exrdsp", checkasm_check_exrdsp },
@@ -305,6 +314,8 @@ static const struct {
     { "NEON",     "neon",     AV_CPU_FLAG_NEON },
     { "DOTPROD",  "dotprod",  AV_CPU_FLAG_DOTPROD },
     { "I8MM",     "i8mm",     AV_CPU_FLAG_I8MM },
+    { "SVE",      "sve",      AV_CPU_FLAG_SVE },
+    { "SVE2",     "sve2",     AV_CPU_FLAG_SVE2 },
 #elif ARCH_ARM
     { "ARMV5TE",  "armv5te",  AV_CPU_FLAG_ARMV5TE },
     { "ARMV6",    "armv6",    AV_CPU_FLAG_ARMV6 },
@@ -352,6 +363,8 @@ static const struct {
 #elif ARCH_LOONGARCH
     { "LSX",      "lsx",      AV_CPU_FLAG_LSX },
     { "LASX",     "lasx",     AV_CPU_FLAG_LASX },
+#elif ARCH_WASM
+    { "SIMD128",    "simd128",  AV_CPU_FLAG_SIMD128 },
 #endif
     { NULL }
 };
@@ -618,34 +631,32 @@ static inline double avg_cycles_per_call(const CheckasmPerf *const p)
 static void print_benchs(CheckasmFunc *f)
 {
     if (f) {
+        CheckasmFuncVersion *v = &f->versions;
+        const CheckasmPerf *p = &v->perf;
+        const double baseline = avg_cycles_per_call(p);
+        double decicycles;
+
         print_benchs(f->child[0]);
 
-        /* Only print functions with at least one assembly version */
-        if (f->versions.cpu || f->versions.next) {
-            CheckasmFuncVersion *v = &f->versions;
-            const CheckasmPerf *p = &v->perf;
-            const double baseline = avg_cycles_per_call(p);
-            double decicycles;
-            do {
-                if (p->iterations) {
-                    p = &v->perf;
-                    decicycles = avg_cycles_per_call(p);
-                    if (state.csv || state.tsv) {
-                        const char sep = state.csv ? ',' : '\t';
-                        printf("%s%c%s%c%.1f\n", f->name, sep,
-                               cpu_suffix(v->cpu), sep,
-                               decicycles / 10.0);
-                    } else {
-                        const int pad_length = 10 + 50 -
-                            printf("%s_%s:", f->name, cpu_suffix(v->cpu));
-                        const double ratio = decicycles ?
-                            baseline / decicycles : 0.0;
-                        printf("%*.1f (%5.2fx)\n", FFMAX(pad_length, 0),
-                            decicycles / 10.0, ratio);
-                    }
+        do {
+            if (p->iterations) {
+                p = &v->perf;
+                decicycles = avg_cycles_per_call(p);
+                if (state.csv || state.tsv) {
+                    const char sep = state.csv ? ',' : '\t';
+                    printf("%s%c%s%c%.1f\n", f->name, sep,
+                           cpu_suffix(v->cpu), sep,
+                           decicycles / 10.0);
+                } else {
+                    const int pad_length = 10 + 50 -
+                        printf("%s_%s:", f->name, cpu_suffix(v->cpu));
+                    const double ratio = decicycles ?
+                        baseline / decicycles : 0.0;
+                    printf("%*.1f (%5.2fx)\n", FFMAX(pad_length, 0),
+                        decicycles / 10.0, ratio);
                 }
-            } while ((v = v->next));
-        }
+            }
+        } while ((v = v->next));
 
         print_benchs(f->child[1]);
     }
@@ -758,7 +769,7 @@ static LONG NTAPI signal_handler(EXCEPTION_POINTERS *e) {
     return EXCEPTION_CONTINUE_EXECUTION; /* never reached, but shuts up gcc */
 }
 #endif
-#else
+#elif !defined(_WASI_EMULATED_SIGNAL)
 static void signal_handler(int s);
 
 static const struct sigaction signal_handler_act = {
@@ -915,12 +926,13 @@ int main(int argc, char *argv[])
 {
     unsigned int seed = av_get_random_seed();
     int i, ret = 0;
+    char arch_info_buf[50] = "";
 
 #ifdef _WIN32
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
     AddVectoredExceptionHandler(0, signal_handler);
 #endif
-#else
+#elif !defined(_WASI_EMULATED_SIGNAL)
     sigaction(SIGBUS,  &signal_handler_act, NULL);
     sigaction(SIGFPE,  &signal_handler_act, NULL);
     sigaction(SIGILL,  &signal_handler_act, NULL);
@@ -979,7 +991,16 @@ int main(int argc, char *argv[])
         }
     }
 
-    fprintf(stderr, "checkasm: using random seed %u\n", seed);
+#if ARCH_AARCH64 && HAVE_SVE
+    if (have_sve(av_get_cpu_flags()))
+        snprintf(arch_info_buf, sizeof(arch_info_buf),
+                 "SVE %d bits, ", 8 * ff_aarch64_sve_length());
+#elif ARCH_RISCV && HAVE_RVV
+    if (av_get_cpu_flags() & AV_CPU_FLAG_RVV_I32)
+        snprintf(arch_info_buf, sizeof (arch_info_buf),
+                 "%zu-bit vectors, ", 8 * ff_get_rv_vlenb());
+#endif
+    fprintf(stderr, "checkasm: %susing random seed %u\n", arch_info_buf, seed);
     av_lfg_init(&checkasm_lfg, seed);
 
     if (state.bench_pattern)

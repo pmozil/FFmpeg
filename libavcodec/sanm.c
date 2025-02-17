@@ -291,6 +291,7 @@ typedef struct SANMVideoContext {
 
     int8_t p4x4glyphs[NGLYPHS][16];
     int8_t p8x8glyphs[NGLYPHS][64];
+    uint8_t c47itbl[0x10000];
 } SANMVideoContext;
 
 typedef struct SANMFrameHeader {
@@ -623,8 +624,8 @@ static inline void codec37_mv(uint8_t *dst, const uint8_t *src,
 static int old_codec37(SANMVideoContext *ctx, int top,
                        int left, int width, int height)
 {
+    int i, j, k, l, t, run, len, code, skip, mx, my;
     ptrdiff_t stride = ctx->pitch;
-    int i, j, k, t;
     uint8_t *dst, *prev;
     int skip_run = 0;
     int compr = bytestream2_get_byte(&ctx->gb);
@@ -644,10 +645,11 @@ static int old_codec37(SANMVideoContext *ctx, int top,
 
     ctx->rotate_code = 0;
 
-    if (((seq & 1) || !(flags & 1)) && (compr && compr != 2))
-        rotate_bufs(ctx, 1);
+    if (((seq & 1) || !(flags & 1)) && (compr && compr != 2)) {
+        FFSWAP(uint16_t*, ctx->frm1, ctx->frm2);
+    }
 
-    dst  = ((uint8_t*)ctx->frm0) + left + top * stride;
+    dst  = ((uint8_t*)ctx->frm1) + left + top * stride;
     prev = ((uint8_t*)ctx->frm2) + left + top * stride;
 
     if (mvoff > 2) {
@@ -661,100 +663,117 @@ static int old_codec37(SANMVideoContext *ctx, int top,
             bytestream2_get_buffer(&ctx->gb, dst, width);
             dst += stride;
         }
-        memset(ctx->frm1, 0, ctx->height * stride);
         memset(ctx->frm2, 0, ctx->height * stride);
+        break;
+    case 1:
+        run = 0;
+        len = -1;
+        code = 0;
+
+        for (j = 0; j < height; j += 4) {
+            for (i = 0; i < width; i += 4) {
+                if (len < 0) {
+                    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                        return AVERROR_INVALIDDATA;
+                    code = bytestream2_get_byte(&ctx->gb);
+                    len = code >> 1;
+                    run = code & 1;
+                    skip = 0;
+                } else {
+                    skip = run;
+                }
+
+                if (!skip) {
+                    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                        return AVERROR_INVALIDDATA;
+                    code = bytestream2_get_byte(&ctx->gb);
+                    if (code == 0xff) {
+                        len--;
+                        for (k = 0; k < 4; k++) {
+                            for (l = 0; l < 4; l++) {
+                                if (len < 0) {
+                                    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                                        return AVERROR_INVALIDDATA;
+                                    code = bytestream2_get_byte(&ctx->gb);
+                                    len = code >> 1;
+                                    run = code & 1;
+                                    if (run) {
+                                        if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                                            return AVERROR_INVALIDDATA;
+                                        code = bytestream2_get_byte(&ctx->gb);
+                                    }
+                                }
+                                if (!run) {
+                                    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                                            return AVERROR_INVALIDDATA;
+                                        code = bytestream2_get_byte(&ctx->gb);
+                                }
+                                *(dst + i + (k * stride) + l) = code;
+                                len--;
+                            }
+                        }
+                        continue;
+                    }
+                }
+                /* 4x4 block copy from prev with MV */
+                mx = c37_mv[(mvoff * 255 + code) * 2];
+                my = c37_mv[(mvoff * 255 + code) * 2 + 1];
+                codec37_mv(dst + i, prev + i + mx + my * stride,
+                           ctx->height, stride, i + mx, j + my);
+                len--;
+            }
+            dst += stride * 4;
+            prev += stride * 4;
+        }
         break;
     case 2:
         if (rle_decode(ctx, dst, decoded_size))
             return AVERROR_INVALIDDATA;
-        memset(ctx->frm1, 0, ctx->frm1_size);
         memset(ctx->frm2, 0, ctx->frm2_size);
         break;
     case 3:
     case 4:
-        if (flags & 4) {
-            for (j = 0; j < height; j += 4) {
-                for (i = 0; i < width; i += 4) {
-                    int code;
-                    if (skip_run) {
-                        skip_run--;
-                        copy_block4(dst + i, prev + i, stride, stride, 4);
-                        continue;
-                    }
+        for (j = 0; j < height; j += 4) {
+            for (i = 0; i < width; i += 4) {
+                int code;
+                if (skip_run) {
+                    skip_run--;
+                    copy_block4(dst + i, prev + i, stride, stride, 4);
+                    continue;
+                }
+                if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                    return AVERROR_INVALIDDATA;
+                code = bytestream2_get_byteu(&ctx->gb);
+                if (code == 0xFF) {
+                    if (bytestream2_get_bytes_left(&ctx->gb) < 16)
+                        return AVERROR_INVALIDDATA;
+                    for (k = 0; k < 4; k++)
+                        bytestream2_get_bufferu(&ctx->gb, dst + i + k * stride, 4);
+                } else if ((flags & 4) && (code == 0xFE)) {
+                    if (bytestream2_get_bytes_left(&ctx->gb) < 4)
+                       return AVERROR_INVALIDDATA;
+                   for (k = 0; k < 4; k++)
+                       memset(dst + i + k * stride, bytestream2_get_byteu(&ctx->gb), 4);
+                } else if ((flags & 4) && (code == 0xFD)) {
                     if (bytestream2_get_bytes_left(&ctx->gb) < 1)
                         return AVERROR_INVALIDDATA;
-                    code = bytestream2_get_byteu(&ctx->gb);
-                    switch (code) {
-                    case 0xFF:
-                        if (bytestream2_get_bytes_left(&ctx->gb) < 16)
-                            return AVERROR_INVALIDDATA;
-                        for (k = 0; k < 4; k++)
-                            bytestream2_get_bufferu(&ctx->gb, dst + i + k * stride, 4);
-                        break;
-                    case 0xFE:
-                        if (bytestream2_get_bytes_left(&ctx->gb) < 4)
-                            return AVERROR_INVALIDDATA;
-                        for (k = 0; k < 4; k++)
-                            memset(dst + i + k * stride, bytestream2_get_byteu(&ctx->gb), 4);
-                        break;
-                    case 0xFD:
-                        if (bytestream2_get_bytes_left(&ctx->gb) < 1)
-                            return AVERROR_INVALIDDATA;
-                        t = bytestream2_get_byteu(&ctx->gb);
-                        for (k = 0; k < 4; k++)
-                            memset(dst + i + k * stride, t, 4);
-                        break;
-                    default:
-                        if (compr == 4 && !code) {
-                            if (bytestream2_get_bytes_left(&ctx->gb) < 1)
-                                return AVERROR_INVALIDDATA;
-                            skip_run = bytestream2_get_byteu(&ctx->gb) + 1;
-                            i -= 4;
-                        } else {
-                            int mx, my;
-
-                            mx = c37_mv[(mvoff * 255 + code) * 2];
-                            my = c37_mv[(mvoff * 255 + code) * 2 + 1];
-                            codec37_mv(dst + i, prev + i + mx + my * stride,
-                                       ctx->height, stride, i + mx, j + my);
-                        }
-                    }
+                    t = bytestream2_get_byteu(&ctx->gb);
+                    for (k = 0; k < 4; k++)
+                        memset(dst + i + k * stride, t, 4);
+               } else if ((compr == 4) && (code == 0)) {
+                    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+                        return AVERROR_INVALIDDATA;
+                    skip_run = bytestream2_get_byteu(&ctx->gb) + 1;
+                    i -= 4;
+               } else {
+                    mx = c37_mv[(mvoff * 255 + code) * 2];
+                    my = c37_mv[(mvoff * 255 + code) * 2 + 1];
+                    codec37_mv(dst + i, prev + i + mx + my * stride,
+                               ctx->height, stride, i + mx, j + my);
                 }
-                dst  += stride * 4;
-                prev += stride * 4;
             }
-        } else {
-            for (j = 0; j < height; j += 4) {
-                for (i = 0; i < width; i += 4) {
-                    int code;
-                    if (skip_run) {
-                        skip_run--;
-                        copy_block4(dst + i, prev + i, stride, stride, 4);
-                        continue;
-                    }
-                    code = bytestream2_get_byte(&ctx->gb);
-                    if (code == 0xFF) {
-                        if (bytestream2_get_bytes_left(&ctx->gb) < 16)
-                            return AVERROR_INVALIDDATA;
-                        for (k = 0; k < 4; k++)
-                            bytestream2_get_bufferu(&ctx->gb, dst + i + k * stride, 4);
-                    } else if (compr == 4 && !code) {
-                        if (bytestream2_get_bytes_left(&ctx->gb) < 1)
-                            return AVERROR_INVALIDDATA;
-                        skip_run = bytestream2_get_byteu(&ctx->gb) + 1;
-                        i -= 4;
-                    } else {
-                        int mx, my;
-
-                        mx = c37_mv[(mvoff * 255 + code) * 2];
-                        my = c37_mv[(mvoff * 255 + code) * 2 + 1];
-                        codec37_mv(dst + i, prev + i + mx + my * stride,
-                                   ctx->height, stride, i + mx, j + my);
-                    }
-                }
-                dst  += stride * 4;
-                prev += stride * 4;
-            }
+            dst  += stride * 4;
+            prev += stride * 4;
         }
         break;
     default:
@@ -763,6 +782,7 @@ static int old_codec37(SANMVideoContext *ctx, int top,
         return AVERROR_PATCHWELCOME;
     }
 
+    memcpy(ctx->frm0, ctx->frm1, ctx->buf_size);
     return 0;
 }
 
@@ -856,6 +876,55 @@ static int process_block(SANMVideoContext *ctx, uint8_t *dst, uint8_t *prev1,
     return 0;
 }
 
+static void codec47_read_interptable(SANMVideoContext *ctx)
+{
+    uint8_t *p1, *p2, *itbl = ctx->c47itbl;
+    int i, j;
+
+    for (i = 0; i < 256; i++) {
+        p1 = p2 = itbl + i;
+        for (j = 256 - i; j; j--) {
+            *p1 = *p2 = bytestream2_get_byte(&ctx->gb);
+            p1 += 1;
+            p2 += 256;
+        }
+        itbl += 256;
+    }
+}
+
+static void codec47_comp1(SANMVideoContext *ctx, uint8_t *dst_in, int width,
+                          int height, ptrdiff_t stride)
+{
+    uint8_t p1, *dst, *itbl = ctx->c47itbl;
+    uint16_t px;
+    int i, j;
+
+    dst = dst_in + stride;
+    for (i = 0; i < height; i += 2) {
+        p1 = bytestream2_get_byte(&ctx->gb);
+        *dst++ = p1;
+        *dst++ = p1;
+        px = p1;
+        for (j = 2; j < width; j += 2) {
+            p1 = bytestream2_get_byte(&ctx->gb);
+            px = (px << 8) | p1;
+            *dst++ = itbl[px];
+            *dst++ = p1;
+        }
+        dst += stride;
+    }
+
+    memcpy(dst_in, dst_in + stride, width);
+    dst = dst_in + stride + stride;
+    for (i = 2; i < height - 1; i += 2) {
+        for (j = 0; j < width; j++) {
+            px = (*(dst - stride) << 8) | *(dst + stride);
+            *dst++ = itbl[px];
+        }
+        dst += stride;
+    }
+}
+
 static int old_codec47(SANMVideoContext *ctx, int top,
                        int left, int width, int height)
 {
@@ -863,15 +932,18 @@ static int old_codec47(SANMVideoContext *ctx, int top,
     int i, j;
     ptrdiff_t stride = ctx->pitch;
     uint8_t *dst   = (uint8_t *)ctx->frm0 + left + top * stride;
-    uint8_t *prev1 = (uint8_t *)ctx->frm1;
-    uint8_t *prev2 = (uint8_t *)ctx->frm2;
+    uint8_t *prev1 = (uint8_t *)ctx->frm1 + left + top * stride;
+    uint8_t *prev2 = (uint8_t *)ctx->frm2 + left + top * stride;
+    uint8_t auxcol[2];
     int tbl_pos = bytestream2_tell(&ctx->gb);
     int seq     = bytestream2_get_le16(&ctx->gb);
     int compr   = bytestream2_get_byte(&ctx->gb);
     int new_rot = bytestream2_get_byte(&ctx->gb);
     int skip    = bytestream2_get_byte(&ctx->gb);
 
-    bytestream2_skip(&ctx->gb, 9);
+    bytestream2_skip(&ctx->gb, 7);
+    auxcol[0] = bytestream2_get_byteu(&ctx->gb);
+    auxcol[1] = bytestream2_get_byteu(&ctx->gb);
     decoded_size = bytestream2_get_le32(&ctx->gb);
     bytestream2_skip(&ctx->gb, 8);
 
@@ -880,12 +952,15 @@ static int old_codec47(SANMVideoContext *ctx, int top,
         av_log(ctx->avctx, AV_LOG_WARNING, "Decoded size is too large.\n");
     }
 
-    if (skip & 1)
-        bytestream2_skip(&ctx->gb, 0x8080);
+    if (skip & 1) {
+        if (bytestream2_get_bytes_left(&ctx->gb) < 0x8080)
+            return AVERROR_INVALIDDATA;
+        codec47_read_interptable(ctx);
+    }
     if (!seq) {
         ctx->prev_seq = -1;
-        memset(prev1, 0, ctx->height * stride);
-        memset(prev2, 0, ctx->height * stride);
+        memset(prev1, auxcol[0], (ctx->height - top) * stride);
+        memset(prev2, auxcol[1], (ctx->height - top) * stride);
     }
 
     switch (compr) {
@@ -900,15 +975,7 @@ static int old_codec47(SANMVideoContext *ctx, int top,
     case 1:
         if (bytestream2_get_bytes_left(&ctx->gb) < ((width + 1) >> 1) * ((height + 1) >> 1))
             return AVERROR_INVALIDDATA;
-        for (j = 0; j < height; j += 2) {
-            for (i = 0; i < width; i += 2) {
-                dst[i] =
-                dst[i + 1] =
-                dst[stride + i] =
-                dst[stride + i + 1] = bytestream2_get_byteu(&ctx->gb);
-            }
-            dst += stride * 2;
-        }
+        codec47_comp1(ctx, dst, width, height, stride);
         break;
     case 2:
         if (seq == ctx->prev_seq + 1) {
@@ -947,6 +1014,227 @@ static int old_codec47(SANMVideoContext *ctx, int top,
     return 0;
 }
 
+// scale 4x4 input block to an 8x8 output block
+static void c48_4to8(uint8_t *dst, const uint8_t *src, const uint16_t w)
+{
+    uint16_t p;
+    // dst is always at least 16bit aligned
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 8; j += 2) {
+            p = *src++;
+            p = (p << 8) | p;
+            *((uint16_t *)(dst + w * 0 + j)) = p;
+            *((uint16_t *)(dst + w * 1 + j)) = p;
+        }
+        dst += w * 2;
+    }
+}
+
+static int codec48_block(SANMVideoContext *ctx, uint8_t *dst, uint8_t *db,
+                         const uint16_t w)
+{
+    uint8_t opc, sb[16];
+    int i, j, k, l;
+    int16_t mvofs;
+    uint32_t ofs;
+
+    if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+        return 1;
+
+    opc = bytestream2_get_byteu(&ctx->gb);
+    switch (opc) {
+    case 0xFF:    // 1x1 -> 8x8 block scale
+        if (bytestream2_get_bytes_left(&ctx->gb) < 1)
+            return 1;
+
+        opc = bytestream2_get_byteu(&ctx->gb);
+        for (i = 0; i < 16; i++)
+            sb[i] = opc;
+        c48_4to8(dst, sb, w);
+        break;
+    case 0xFE:    // 1x 8x8 copy from deltabuf, 16bit mv from source
+        if (bytestream2_get_bytes_left(&ctx->gb) < 2)
+            return 1;
+        mvofs =  bytestream2_get_le16(&ctx->gb);
+        for (i = 0; i < 8; i++) {
+            ofs = w * i;
+            for (k = 0; k < 8; k++)
+                *(dst + ofs + k) = *(db + ofs + k + mvofs);
+        }
+        break;
+    case 0xFD:    // 2x2 -> 8x8 block scale
+        if (bytestream2_get_bytes_left(&ctx->gb) < 4)
+            return 1;
+        sb[ 5] =  bytestream2_get_byteu(&ctx->gb);
+        sb[ 7] =  bytestream2_get_byteu(&ctx->gb);
+        sb[13] =  bytestream2_get_byteu(&ctx->gb);
+        sb[15] =  bytestream2_get_byteu(&ctx->gb);
+
+        sb[0] = sb[1] = sb[4] = sb[5];
+        sb[2] = sb[3] = sb[6] = sb[7];
+        sb[8] = sb[9] = sb[12] = sb[13];
+        sb[10] = sb[11] = sb[14] = sb[15];
+        c48_4to8(dst, sb, w);
+        break;
+    case 0xFC:    // 4x copy 4x4 block, per-block c37_mv from source
+        if (bytestream2_get_bytes_left(&ctx->gb) < 4)
+            return 1;
+        for (i = 0; i < 8; i += 4) {
+            for (k = 0; k < 8; k += 4) {
+                opc =  bytestream2_get_byteu(&ctx->gb);
+                mvofs = c37_mv[opc * 2] + (c37_mv[opc * 2 + 1] * w);
+                for (j = 0; j < 4; j++) {
+                    ofs = (w * (j + i)) + k;
+                    for (l = 0; l < 4; l++)
+                        *(dst + ofs + l) = *(db + ofs + l + mvofs);
+                }
+            }
+        }
+        break;
+    case 0xFB:    // Copy 4x 4x4 blocks, per-block mv from source
+        if (bytestream2_get_bytes_left(&ctx->gb) < 8)
+            return 1;
+        for (i = 0; i < 8; i += 4) {
+            for (k = 0; k < 8; k += 4) {
+                mvofs = bytestream2_get_le16(&ctx->gb);
+                for (j = 0; j < 4; j++) {
+                    ofs = (w * (j + i)) + k;
+                    for (l = 0; l < 4; l++)
+                        *(dst + ofs + l) = *(db + ofs + l + mvofs);
+                }
+            }
+        }
+        break;
+    case 0xFA:    // scale 4x4 input block to 8x8 dest block
+        if (bytestream2_get_bytes_left(&ctx->gb) < 16)
+            return 1;
+        bytestream2_get_bufferu(&ctx->gb, sb, 16);
+        c48_4to8(dst, sb, w);
+        break;
+    case 0xF9:    // 16x 2x2 copy from delta, per-block c37_mv from source
+        if (bytestream2_get_bytes_left(&ctx->gb) < 16)
+            return 1;
+        for (i = 0; i < 8; i += 2) {
+            for (j = 0; j < 8; j += 2) {
+                ofs = (w * i) + j;
+                opc = bytestream2_get_byteu(&ctx->gb);
+                mvofs = c37_mv[opc * 2] + (c37_mv[opc * 2 + 1] * w);
+                for (l = 0; l < 2; l++) {
+                    *(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+                    *(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+                }
+            }
+        }
+        break;
+    case 0xF8:    // 16x 2x2 blocks copy, 16bit mv from source
+        if (bytestream2_get_bytes_left(&ctx->gb) < 32)
+            return 1;
+        for (i = 0; i < 8; i += 2) {
+            for (j = 0; j < 8; j += 2) {
+                ofs = w * i + j;
+                mvofs = bytestream2_get_le16(&ctx->gb);
+                for (l = 0; l < 2; l++) {
+                    *(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+                    *(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+                }
+            }
+        }
+        break;
+    case 0xF7:    // copy 8x8 block from src to dest
+        if (bytestream2_get_bytes_left(&ctx->gb) < 64)
+            return 1;
+        for (i = 0; i < 8; i++) {
+            ofs = i * w;
+            for (l = 0; l < 8; l++)
+                *(dst + ofs + l) = bytestream2_get_byteu(&ctx->gb);
+        }
+        break;
+    default:    // copy 8x8 block from prev, c37_mv from source
+        mvofs = c37_mv[opc * 2] + (c37_mv[opc * 2 + 1] * w);
+        for (i = 0; i < 8; i++) {
+            ofs = i * w;
+            for (l = 0; l < 8; l++)
+                *(dst + ofs + l) = *(db + ofs + l + mvofs);
+        }
+        break;
+    }
+    return 0;
+}
+
+static int old_codec48(SANMVideoContext *ctx, int width, int height)
+{
+    uint8_t *dst, *prev;
+    int compr = bytestream2_get_byte(&ctx->gb);
+    int mvidx = bytestream2_get_byte(&ctx->gb);
+    int seq   = bytestream2_get_le16(&ctx->gb);
+    uint32_t decoded_size = bytestream2_get_le32(&ctx->gb);
+    int i, j, flags;
+
+    // all codec48 videos use 1, but just to be safe...
+    if (mvidx != 1) {
+        av_log(ctx->avctx, AV_LOG_ERROR, "Invalid motion base value %d.\n", mvidx);
+        return AVERROR_INVALIDDATA;
+    }
+
+    bytestream2_skip(&ctx->gb, 4);
+    flags = bytestream2_get_byte(&ctx->gb);
+    bytestream2_skip(&ctx->gb, 3);
+
+    if (flags & 8) {
+        if (bytestream2_get_bytes_left(&ctx->gb) < 0x8080)
+            return AVERROR_INVALIDDATA;
+        codec47_read_interptable(ctx);
+    }
+
+    dst  = (uint8_t*)ctx->frm0;
+    prev = (uint8_t*)ctx->frm2;
+
+    if (!seq) {
+        ctx->prev_seq = -1;
+        memset(prev, 0, ctx->aligned_height * width);
+    }
+
+    switch (compr) {
+    case 0:
+        if (bytestream2_get_bytes_left(&ctx->gb) < width * height)
+            return AVERROR_INVALIDDATA;
+        for (j = 0; j < height; j++) {
+            bytestream2_get_bufferu(&ctx->gb, dst, width);
+            dst += width;
+        }
+        break;
+    case 2:
+        if (rle_decode(ctx, dst, decoded_size))
+            return AVERROR_INVALIDDATA;
+        break;
+    case 3:
+        if (seq == ctx->prev_seq + 1) {
+            for (j = 0; j < height; j += 8) {
+                for (i = 0; i < width; i += 8) {
+                    if (codec48_block(ctx, dst + i, prev + i, width))
+                        return AVERROR_INVALIDDATA;
+                }
+                dst += width * 8;
+                prev += width * 8;
+            }
+        }
+        break;
+    case 5:
+        if (bytestream2_get_bytes_left(&ctx->gb) < ((width + 1) >> 1) * ((height + 1) >> 1))
+            return AVERROR_INVALIDDATA;
+        codec47_comp1(ctx, dst, width, height, width);
+        break;
+
+    default:
+        avpriv_report_missing_feature(ctx->avctx,
+                                      "Subcodec 48 compression %d", compr);
+        return AVERROR_PATCHWELCOME;
+    }
+    ctx->rotate_code = 1;    // swap frm[0] and frm[2]
+    ctx->prev_seq = seq;
+    return 0;
+}
+
 static int process_frame_obj(SANMVideoContext *ctx)
 {
     uint16_t codec = bytestream2_get_le16u(&ctx->gb);
@@ -982,10 +1270,51 @@ static int process_frame_obj(SANMVideoContext *ctx)
         return old_codec37(ctx, top, left, w, h);
     case 47:
         return old_codec47(ctx, top, left, w, h);
+    case 48:
+        return old_codec48(ctx, w, h);
     default:
         avpriv_request_sample(ctx->avctx, "Subcodec %d", codec);
         return AVERROR_PATCHWELCOME;
     }
+}
+
+static int process_xpal(SANMVideoContext *ctx, int size)
+{
+    int16_t *dp = ctx->delta_pal;
+    uint32_t *pal = ctx->pal;
+    uint16_t cmd;
+    uint8_t c[3];
+    int i, j;
+
+    bytestream2_skip(&ctx->gb, 2);
+    cmd = bytestream2_get_be16(&ctx->gb);
+
+    if (cmd == 1) {
+        for (i = 0; i < PALETTE_DELTA; i += 3) {
+            c[0] = (*pal >> 16) & 0xFF;
+            c[1] = (*pal >>  8) & 0xFF;
+            c[2] = (*pal >>  0) & 0xFF;
+            for (j = 0; j < 3; j++) {
+                int cl = (c[j] * 129) + *dp++;
+                c[j] = av_clip_uint8(cl / 128) & 0xFF;
+            }
+            *pal++ = 0xFFU << 24 | c[0] << 16 | c[1] << 8 | c[2];
+        }
+    } else if (cmd == 2) {
+        if (size < PALETTE_DELTA * 2 + 4) {
+            av_log(ctx->avctx, AV_LOG_ERROR,
+                   "Incorrect palette change block size %"PRIu32".\n", size);
+            return AVERROR_INVALIDDATA;
+        }
+        for (i = 0; i < PALETTE_DELTA; i++)
+            dp[i] = bytestream2_get_le16u(&ctx->gb);
+
+        if (size >= PALETTE_DELTA * 2 + 4 + PALETTE_SIZE * 3) {
+            for (i = 0; i < PALETTE_SIZE; i++)
+                ctx->pal[i] = 0xFFU << 24 | bytestream2_get_be24u(&ctx->gb);
+        }
+    }
+    return 0;
 }
 
 static int decode_0(SANMVideoContext *ctx)
@@ -1427,34 +1756,8 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
                     return ret;
                 break;
             case MKBETAG('X', 'P', 'A', 'L'):
-                if (size == 6 || size == 4) {
-                    uint8_t tmp[3];
-                    int j;
-
-                    for (i = 0; i < PALETTE_SIZE; i++) {
-                        for (j = 0; j < 3; j++) {
-                            int t = (ctx->pal[i] >> (16 - j * 8)) & 0xFF;
-                            tmp[j] = av_clip_uint8((t * 129 + ctx->delta_pal[i * 3 + j]) >> 7);
-                        }
-                        ctx->pal[i] = 0xFFU << 24 | AV_RB24(tmp);
-                    }
-                } else {
-                    if (size < PALETTE_DELTA * 2 + 4) {
-                        av_log(avctx, AV_LOG_ERROR,
-                               "Incorrect palette change block size %"PRIu32".\n",
-                               size);
-                        return AVERROR_INVALIDDATA;
-                    }
-                    bytestream2_skipu(&ctx->gb, 4);
-                    for (i = 0; i < PALETTE_DELTA; i++)
-                        ctx->delta_pal[i] = bytestream2_get_le16u(&ctx->gb);
-                    if (size >= PALETTE_DELTA * 5 + 4) {
-                        for (i = 0; i < PALETTE_SIZE; i++)
-                            ctx->pal[i] = 0xFFU << 24 | bytestream2_get_be24u(&ctx->gb);
-                    } else {
-                        memset(ctx->pal, 0, sizeof(ctx->pal));
-                    }
-                }
+                if (ret = process_xpal(ctx, size))
+                    return ret;
                 break;
             case MKBETAG('S', 'T', 'O', 'R'):
                 to_store = 1;

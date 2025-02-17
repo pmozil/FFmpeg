@@ -46,12 +46,12 @@
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
+#include "libavutil/stereo3d.h"
 
 HWDevice *filter_hw_device;
 
 char *vstats_filename;
 
-float audio_drift_threshold = 0.1;
 float dts_delta_threshold   = 10;
 float dts_error_threshold   = 3600*30;
 
@@ -84,6 +84,15 @@ static int no_file_overwrite  = 0;
 int ignore_unknown_streams = 0;
 int copy_unknown_streams = 0;
 int recast_media = 0;
+
+// this struct is passed as the optctx argument
+// to func_arg() for global options
+typedef struct GlobalOptionsContext {
+    Scheduler      *sch;
+
+    char          **filtergraphs;
+    int          nb_filtergraphs;
+} GlobalOptionsContext;
 
 static void uninit_options(OptionsContext *o)
 {
@@ -228,6 +237,59 @@ OPT_MATCH_PER_STREAM(int,   int,          OPT_TYPE_INT,    i);
 OPT_MATCH_PER_STREAM(int64, int64_t,      OPT_TYPE_INT64,  i64);
 OPT_MATCH_PER_STREAM(dbl,   double,       OPT_TYPE_DOUBLE, dbl);
 
+int view_specifier_parse(const char **pspec, ViewSpecifier *vs)
+{
+    const char *spec = *pspec;
+    char *endptr;
+
+    vs->type = VIEW_SPECIFIER_TYPE_NONE;
+
+    if (!strncmp(spec, "view:", 5)) {
+        spec += 5;
+
+        if (!strncmp(spec, "all", 3)) {
+            spec += 3;
+            vs->type = VIEW_SPECIFIER_TYPE_ALL;
+        } else {
+            vs->type = VIEW_SPECIFIER_TYPE_ID;
+            vs->val  = strtoul(spec, &endptr, 0);
+            if (endptr == spec) {
+                av_log(NULL, AV_LOG_ERROR, "Invalid view ID: %s\n", spec);
+                return AVERROR(EINVAL);
+            }
+            spec = endptr;
+        }
+    } else if (!strncmp(spec, "vidx:", 5)) {
+        spec += 5;
+        vs->type = VIEW_SPECIFIER_TYPE_IDX;
+        vs->val  = strtoul(spec, &endptr, 0);
+        if (endptr == spec) {
+            av_log(NULL, AV_LOG_ERROR, "Invalid view index: %s\n", spec);
+            return AVERROR(EINVAL);
+        }
+        spec = endptr;
+    } else if (!strncmp(spec, "vpos:", 5)) {
+        spec += 5;
+        vs->type = VIEW_SPECIFIER_TYPE_POS;
+
+        if (!strncmp(spec, "left", 4) && !cmdutils_isalnum(spec[4])) {
+            spec += 4;
+            vs->val = AV_STEREO3D_VIEW_LEFT;
+        } else if (!strncmp(spec, "right", 5) && !cmdutils_isalnum(spec[5])) {
+            spec += 5;
+            vs->val = AV_STEREO3D_VIEW_RIGHT;
+        } else {
+            av_log(NULL, AV_LOG_ERROR, "Invalid view position: %s\n", spec);
+            return AVERROR(EINVAL);
+        }
+    } else
+        return 0;
+
+    *pspec = spec;
+
+    return 0;
+}
+
 int parse_and_set_vsync(const char *arg, int *vsync_var, int file_idx, int st_idx, int is_global)
 {
     if      (!av_strcasecmp(arg, "cfr"))         *vsync_var = VSYNC_CFR;
@@ -291,7 +353,7 @@ static void correct_input_start_times(void)
             if (copy_ts && start_at_zero)
                 ifile->ts_offset = -new_start_time;
             else if (!copy_ts) {
-                abs_start_seek = is->start_time + (ifile->start_time != AV_NOPTS_VALUE) ? ifile->start_time : 0;
+                abs_start_seek = is->start_time + ((ifile->start_time != AV_NOPTS_VALUE) ? ifile->start_time : 0);
                 ifile->ts_offset = abs_start_seek > new_start_time ? -abs_start_seek : -new_start_time;
             } else if (copy_ts)
                 ifile->ts_offset = 0;
@@ -452,6 +514,7 @@ static int opt_map(void *optctx, const char *opt, const char *arg)
             goto fail;
         }
     } else {
+        ViewSpecifier vs;
         char *endptr;
 
         file_idx = strtol(arg, &endptr, 0);
@@ -468,12 +531,18 @@ static int opt_map(void *optctx, const char *opt, const char *arg)
             goto fail;
         }
 
-        if (ss.remainder) {
-            if (!strcmp(ss.remainder, "?"))
+        arg = ss.remainder ? ss.remainder : "";
+
+        ret = view_specifier_parse(&arg, &vs);
+        if (ret < 0)
+            goto fail;
+
+        if (*arg) {
+            if (!strcmp(arg, "?"))
                 allow_unused = 1;
             else {
-                av_log(NULL, AV_LOG_ERROR, "Trailing garbage after stream specifier: %s\n",
-                       ss.remainder);
+                av_log(NULL, AV_LOG_ERROR,
+                       "Trailing garbage after stream specifier: %s\n", arg);
                 ret = AVERROR(EINVAL);
                 goto fail;
             }
@@ -509,6 +578,7 @@ static int opt_map(void *optctx, const char *opt, const char *arg)
 
                 m->file_index   = file_idx;
                 m->stream_index = i;
+                m->vs           = vs;
             }
     }
 
@@ -549,8 +619,8 @@ static int opt_attach(void *optctx, const char *opt, const char *arg)
 
 static int opt_sdp_file(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    return sch_sdp_filename(sch, arg);
+    GlobalOptionsContext *go = optctx;
+    return sch_sdp_filename(go->sch, arg);
 }
 
 #if CONFIG_VAAPI
@@ -1088,26 +1158,46 @@ static int opt_audio_qscale(void *optctx, const char *opt, const char *arg)
 
 static int opt_filter_complex(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    char *graph_desc = av_strdup(arg);
+    GlobalOptionsContext *go = optctx;
+    char *graph_desc;
+    int ret;
+
+    graph_desc = av_strdup(arg);
     if (!graph_desc)
         return AVERROR(ENOMEM);
 
-    return fg_create(NULL, graph_desc, sch);
+    ret = GROW_ARRAY(go->filtergraphs, go->nb_filtergraphs);
+    if (ret < 0) {
+        av_freep(&graph_desc);
+        return ret;
+    }
+    go->filtergraphs[go->nb_filtergraphs - 1] = graph_desc;
+
+    return 0;
 }
 
 #if FFMPEG_OPT_FILTER_SCRIPT
 static int opt_filter_complex_script(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    char *graph_desc = file_read(arg);
+    GlobalOptionsContext *go = optctx;
+    char *graph_desc;
+    int ret;
+
+    graph_desc = file_read(arg);
     if (!graph_desc)
         return AVERROR(EINVAL);
 
     av_log(NULL, AV_LOG_WARNING, "-%s is deprecated, use -/filter_complex %s instead\n",
            opt, arg);
 
-    return fg_create(NULL, graph_desc, sch);
+    ret = GROW_ARRAY(go->filtergraphs, go->nb_filtergraphs);
+    if (ret < 0) {
+        av_freep(&graph_desc);
+        return ret;
+    }
+    go->filtergraphs[go->nb_filtergraphs - 1] = graph_desc;
+
+    return 0;
 }
 #endif
 
@@ -1284,6 +1374,7 @@ static int open_files(OptionGroupList *l, const char *inout, Scheduler *sch,
 
 int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
 {
+    GlobalOptionsContext go = { .sch = sch };
     OptionParseContext octx;
     const char *errmsg = NULL;
     int ret;
@@ -1299,7 +1390,7 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
     }
 
     /* apply global options */
-    ret = parse_optgroup(sch, &octx.global_opts, options);
+    ret = parse_optgroup(&go, &octx.global_opts, options);
     if (ret < 0) {
         errmsg = "parsing global options";
         goto fail;
@@ -1307,6 +1398,14 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
 
     /* configure terminal and setup signal handlers */
     term_init();
+
+    /* create complex filtergraphs */
+    for (int i = 0; i < go.nb_filtergraphs; i++) {
+        ret = fg_create(NULL, go.filtergraphs[i], sch);
+        go.filtergraphs[i] = NULL;
+        if (ret < 0)
+            goto fail;
+    }
 
     /* open input files */
     ret = open_files(&octx.groups[GROUP_INFILE], "input", sch, ifile_open);
@@ -1343,6 +1442,10 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
 
 fail:
+    for (int i = 0; i < go.nb_filtergraphs; i++)
+        av_freep(&go.filtergraphs[i]);
+    av_freep(&go.filtergraphs);
+
     uninit_parse_context(&octx);
     if (ret < 0 && ret != AVERROR_EXIT) {
         av_log(NULL, AV_LOG_FATAL, "Error %s: %s\n",

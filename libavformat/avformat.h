@@ -1082,6 +1082,19 @@ typedef struct AVStreamGroupTileGrid {
      * final image before presentation.
      */
     int height;
+
+    /**
+     * Additional data associated with the grid.
+     *
+     * Should be allocated with av_packet_side_data_new() or
+     * av_packet_side_data_add(), and will be freed by avformat_free_context().
+     */
+    AVPacketSideData *coded_side_data;
+
+    /**
+     * Amount of entries in @ref coded_side_data.
+     */
+    int nb_coded_side_data;
 } AVStreamGroupTileGrid;
 
 /**
@@ -1916,6 +1929,7 @@ typedef struct AVFormatContext {
     int64_t duration_probesize;
 } AVFormatContext;
 
+#if FF_API_AVSTREAM_SIDE_DATA
 /**
  * This function will cause global side data to be injected in the next packet
  * of each stream as well as after any subsequent seek.
@@ -1925,8 +1939,15 @@ typedef struct AVFormatContext {
  *       in a @ref AVCodecContext.coded_side_data "decoder's side data" array if
  *       initialized with said stream's codecpar.
  * @see av_packet_side_data_get()
+ *
+ * @deprecated this function should never be needed, as global side data is now
+ *             exported in AVCodecParameters and should
+ *             be propagated from demuxers to decoders via
+ *             ::avcodec_parameters_to_context()
  */
+attribute_deprecated
 void av_format_inject_global_side_data(AVFormatContext *s);
+#endif
 
 #if FF_API_GET_DUR_ESTIMATE_METHOD
 /**
@@ -2275,7 +2296,7 @@ int av_probe_input_buffer(AVIOContext *pb, const AVInputFormat **fmt,
  *                 which case an AVFormatContext is allocated by this
  *                 function and written into ps.
  *                 Note that a user-supplied AVFormatContext will be freed
- *                 on failure.
+ *                 on failure and its pointer set to NULL.
  * @param url      URL of the stream to open.
  * @param fmt      If non-NULL, this parameter forces a specific input format.
  *                 Otherwise the format is autodetected.
@@ -2284,7 +2305,8 @@ int av_probe_input_buffer(AVIOContext *pb, const AVInputFormat **fmt,
  *                 On return this parameter will be destroyed and replaced with
  *                 a dict containing options that were not found. May be NULL.
  *
- * @return 0 on success, a negative AVERROR on failure.
+ * @return 0 on success; on failure: frees ps, sets its pointer to NULL,
+ *         and returns a negative AVERROR.
  *
  * @note If you want to use custom IO, preallocate the format context and set its pb field.
  */

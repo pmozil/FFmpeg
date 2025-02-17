@@ -1036,6 +1036,8 @@ following image formats are supported:
 @item Kega Game Video (KGV1) @tab      @tab  X
     @tab Kega emulator screen capture codec.
 @item Lagarith               @tab     @tab  X
+@item LCEVC / MPEG-5 LCEVC / MPEG-5 Part 2 @tab     @tab  E
+    @tab decoding supported through external library liblcevc-dec
 @item LCL (LossLess Codec Library) MSZH  @tab     @tab  X
 @item LCL (LossLess Codec Library) ZLIB  @tab  E  @tab  E
 @item LEAD MCMP              @tab     @tab  X
@@ -1107,6 +1109,7 @@ following image formats are supported:
 @item RealVideo 3.0          @tab     @tab  X
     @tab still far from ideal
 @item RealVideo 4.0          @tab     @tab  X
+@item RealVideo 6.0          @tab     @tab  X
 @item Renderware TXD (TeXture Dictionary)  @tab     @tab  X
     @tab Texture dictionaries used by the Renderware Engine.
 @item RivaTuner Video        @tab     @tab  X
@@ -1230,6 +1233,7 @@ following image formats are supported:
 @item ADPCM IMA Duck DK4     @tab     @tab  X
     @tab Used in some Sega Saturn console games.
 @item ADPCM IMA Radical      @tab     @tab  X
+@item ADPCM IMA Xbox         @tab     @tab  X
 @item ADPCM Microsoft        @tab  X  @tab  X
 @item ADPCM MS IMA           @tab  X  @tab  X
 @item ADPCM Nintendo Gamecube AFC  @tab     @tab  X

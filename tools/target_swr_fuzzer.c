@@ -98,7 +98,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         av_channel_layout_copy(& in_ch_layout,  &layouts[bytestream2_get_byte(&gbc) % FF_ARRAY_ELEMS(layouts)]);
         av_channel_layout_copy(&out_ch_layout,  &layouts[bytestream2_get_byte(&gbc) % FF_ARRAY_ELEMS(layouts)]);
 
-        out_sample_nb = bytestream2_get_le32(&gbc);
+        out_sample_nb = bytestream2_get_le32(&gbc) & 0x7FFFFFFF;
 
         flags64 = bytestream2_get_le64(&gbc);
         if (flags64 & 0x10)
@@ -128,6 +128,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
      in_sample_nb = size / (in_ch_count * av_get_bytes_per_sample(in_sample_fmt));
     out_sample_nb = out_sample_nb % (av_rescale(in_sample_nb, 2*out_sample_rate, in_sample_rate) + 1);
+
+    if (in_sample_nb > 1000*1000 || out_sample_nb > 1000*1000)
+        goto end;
 
     out_data = av_malloc(out_sample_nb * out_ch_count * av_get_bytes_per_sample(out_sample_fmt));
     if (!out_data)

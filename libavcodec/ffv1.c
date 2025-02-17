@@ -31,7 +31,7 @@
 
 #include "avcodec.h"
 #include "ffv1.h"
-#include "refstruct.h"
+#include "libavutil/refstruct.h"
 
 av_cold int ff_ffv1_common_init(AVCodecContext *avctx)
 {
@@ -53,7 +53,7 @@ av_cold int ff_ffv1_common_init(AVCodecContext *avctx)
     return 0;
 }
 
-static void planes_free(FFRefStructOpaque opaque, void *obj)
+static void planes_free(AVRefStructOpaque opaque, void *obj)
 {
     PlaneContext *planes = obj;
 
@@ -67,7 +67,7 @@ static void planes_free(FFRefStructOpaque opaque, void *obj)
 
 PlaneContext* ff_ffv1_planes_alloc(void)
 {
-    return ff_refstruct_alloc_ext(sizeof(PlaneContext) * MAX_PLANES,
+    return av_refstruct_alloc_ext(sizeof(PlaneContext) * MAX_PLANES,
                                   0, NULL, planes_free);
 }
 
@@ -119,6 +119,26 @@ av_cold int ff_ffv1_init_slices_state(FFV1Context *f)
     return 0;
 }
 
+int ff_need_new_slices(int width, int num_h_slices, int chroma_shift) {
+    int mpw = 1<<chroma_shift;
+    int i = width * (int64_t)(num_h_slices - 1) / num_h_slices;
+
+    return width % mpw && (width - i) % mpw == 0;
+}
+
+int ff_slice_coord(const FFV1Context *f, int width, int sx, int num_h_slices, int chroma_shift) {
+    int mpw = 1<<chroma_shift;
+    int awidth = FFALIGN(width, mpw);
+
+    if (f->combined_version <= 0x40002)
+        return width * sx / num_h_slices;
+
+    sx = (2LL * awidth * sx + num_h_slices * mpw) / (2 * num_h_slices * mpw) * mpw;
+    if (sx == awidth)
+        sx = width;
+    return sx;
+}
+
 av_cold int ff_ffv1_init_slice_contexts(FFV1Context *f)
 {
     int max_slice_count = f->num_h_slices * f->num_v_slices;
@@ -135,15 +155,17 @@ av_cold int ff_ffv1_init_slice_contexts(FFV1Context *f)
         FFV1SliceContext *sc = &f->slices[i];
         int sx          = i % f->num_h_slices;
         int sy          = i / f->num_h_slices;
-        int sxs         = f->avctx->width  *  sx      / f->num_h_slices;
-        int sxe         = f->avctx->width  * (sx + 1) / f->num_h_slices;
-        int sys         = f->avctx->height *  sy      / f->num_v_slices;
-        int sye         = f->avctx->height * (sy + 1) / f->num_v_slices;
+        int sxs         = ff_slice_coord(f, f->avctx->width , sx    , f->num_h_slices, f->chroma_h_shift);
+        int sxe         = ff_slice_coord(f, f->avctx->width , sx + 1, f->num_h_slices, f->chroma_h_shift);
+        int sys         = ff_slice_coord(f, f->avctx->height, sy   ,  f->num_v_slices, f->chroma_v_shift);
+        int sye         = ff_slice_coord(f, f->avctx->height, sy + 1, f->num_v_slices, f->chroma_v_shift);
 
         sc->slice_width  = sxe - sxs;
         sc->slice_height = sye - sys;
         sc->slice_x      = sxs;
         sc->slice_y      = sys;
+        sc->sx           = sx;
+        sc->sy           = sy;
 
         sc->sample_buffer = av_malloc_array((f->width + 6), 3 * MAX_PLANES *
                                             sizeof(*sc->sample_buffer));
@@ -211,10 +233,10 @@ av_cold int ff_ffv1_close(AVCodecContext *avctx)
         av_freep(&sc->sample_buffer);
         av_freep(&sc->sample_buffer32);
 
-        ff_refstruct_unref(&sc->plane);
+        av_refstruct_unref(&sc->plane);
     }
 
-    ff_refstruct_unref(&s->slice_damaged);
+    av_refstruct_unref(&s->slice_damaged);
 
     av_freep(&avctx->stats_out);
     for (j = 0; j < s->quant_table_count; j++) {

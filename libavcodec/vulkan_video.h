@@ -20,7 +20,7 @@
 #define AVCODEC_VULKAN_VIDEO_H
 
 #include "avcodec.h"
-#include "vulkan.h"
+#include "libavutil/vulkan.h"
 
 #include <vk_video/vulkan_video_codecs_common.h>
 
@@ -62,12 +62,6 @@ VkVideoChromaSubsamplingFlagBitsKHR ff_vk_subsampling_from_av_desc(const AVPixFm
  * Get Vulkan's bit depth from an [8:12] integer.
  */
 VkVideoComponentBitDepthFlagBitsKHR ff_vk_depth_from_av_depth(int depth);
-
-/**
- * Chooses a QF and loads it into a context.
- */
-int ff_vk_video_qf_init(FFVulkanContext *s, FFVkQueueFamilyCtx *qf,
-                        VkQueueFlagBits family, VkVideoCodecOperationFlagBitsKHR caps);
 
 /**
  * Convert level from Vulkan to AV.

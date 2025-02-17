@@ -492,8 +492,9 @@ int locate_option(int argc, char **argv, const OptionDef *options,
     for (i = 1; i < argc; i++) {
         const char *cur_opt = argv[i];
 
-        if (*cur_opt++ != '-')
+        if (!(cur_opt[0] == '-' && cur_opt[1]))
             continue;
+        cur_opt++;
 
         po = find_option(options, cur_opt);
         if (!po->name && cur_opt[0] == 'n' && cur_opt[1] == 'o')
@@ -551,11 +552,12 @@ static void check_options(const OptionDef *po)
 
 void parse_loglevel(int argc, char **argv, const OptionDef *options)
 {
-    int idx = locate_option(argc, argv, options, "loglevel");
+    int idx;
     char *env;
 
     check_options(options);
 
+    idx = locate_option(argc, argv, options, "loglevel");
     if (!idx)
         idx = locate_option(argc, argv, options, "v");
     if (idx && argv[idx + 1])
@@ -988,7 +990,7 @@ FILE *get_preset_file(char *filename, size_t filename_size,
     return f;
 }
 
-static int cmdutils_isalnum(char c)
+int cmdutils_isalnum(char c)
 {
     return (c >= '0' && c <= '9') ||
            (c >= 'A' && c <= 'Z') ||
