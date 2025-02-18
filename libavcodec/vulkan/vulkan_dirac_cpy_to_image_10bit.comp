@@ -1,0 +1,22 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+
+void main() {);
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
+    int plane = int(gl_GlobalInvocationID.z);
+    if (!IS_WITHIN(ivec2(x, y), imageSize(out_img[plane]))) {
+        return;
+    }
+    int idx = plane_offs[plane] + y * plane_strides[plane] + x;
+    int32_t ival = inBuf[idx] + 512;
+    float val = float(clamp(ival, 0, 1024)) / 65536.0;
+    imageStore(out_img[plane], ivec2(x, y), vec4(val));
+    memoryBarrier();
+});

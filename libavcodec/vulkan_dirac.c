@@ -402,40 +402,6 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
 fail:
     return err;
 }
-// GLSLC(
-//     0, layout(push_constant, std430) uniform pushConstants {  );
-//         GLSLC(1, ivec2 plane_sizes[3];);
-//         GLSLC(1, int plane_offs[3];);
-//         GLSLC(1, int plane_strides[3];);
-//         GLSLC(1, int dw[3];);
-//         GLSLC(1, int wavelet_depth;);
-// GLSLC(0,
-//     };);
-// GLSLC(0, );
-//
-// GLSLC(
-//     0, void main() {);
-//         GLSLC(1, int x = int(gl_GlobalInvocationID.x););
-//         GLSLC(1, int y = int(gl_GlobalInvocationID.y););
-//         GLSLC(1, int plane = int(gl_GlobalInvocationID.z););
-//         GLSLC(1, if (!IS_WITHIN(ivec2(x, y),
-//                                 imageSize(out_img[plane]))) return;);
-//         GLSLC(1,
-//               int idx = plane_offs[plane] + y * plane_strides[plane] + x;);
-//         if (idx == 2) {
-//             GLSLC(1, int32_t ival = inBuf[idx] + 2048;);
-//             GLSLC(1, float val = float(clamp(ival, 0, 4096)) / 65535.0;);
-//         } else if (idx == 1) {
-//             GLSLC(1, int32_t ival = inBuf[idx] + 512;);
-//             GLSLC(1, float val = float(clamp(ival, 0, 1024)) / 65535.0;);
-//         } else {
-//             GLSLC(1, int32_t ival = inBuf[idx] + 128;);
-//             GLSLC(1, float val = float(clamp(ival, 0, 256)) / 255.0;);
-//         }
-//         GLSLC(1, imageStore(out_img[plane], ivec2(x, y), vec4(val)););
-//         GLSLC(1, memoryBarrier(););
-// GLSLC(0,
-//     });
 
 // static av_always_inline int inline cpy_to_image_pass(
 //     DiracVulkanDecodeContext *dec, DiracContext *ctx, FFVkExecContext *exec,
