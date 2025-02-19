@@ -1,0 +1,51 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+void dequant(int outIdx, int idx, int qf, int qs) {
+    int32_t val = inBuffer[idx];
+    val = sign(val) * ((abs(val) * qf + qs) >> 2);
+    outBuf0[outIdx] = outBuf1[outIdx] = val;
+}
+
+void proc_slice(int slice_idx) {
+    const int plane = int(gl_GlobalInvocationID.y);
+    const int level = int(gl_GlobalInvocationID.z);
+    if (level >= wavelet_depth) return;
+    const int base_idx = slice_idx * DWT_LEVELS * 8;
+    const int base_slice_idx = slice_idx * DWT_LEVELS * 3 + plane * DWT_LEVELS;
+
+    const Slice s = slices[base_slice_idx + level];
+    int offs = s.offs;
+
+    for(int orient = int(bool(level)); orient < 4; orient++) {
+        int32_t qf = quantMatrix[base_idx + level * 8 + orient];
+        int32_t qs = quantMatrix[base_idx + level * 8 + orient + 4];
+
+        const int subband_idx = plane * DWT_LEVELS * 4
+                                    + 4 * level + orient;
+
+        const SubbandOffset sub_off = subband_offs[subband_idx];
+        int img_idx = plane_offs[plane] + sub_off.base_off
+                        + s.top * sub_off.stride + s.left;
+
+        for(int y = 0; y < s.tot_v; y++) {
+            int img_x = img_idx;
+            for(int x = 0; x < s.tot_h; x++) {
+                dequant(img_x, offs, qf, qs);
+                img_x++;
+                offs++;
+            }
+            img_idx += sub_off.stride;
+        }
+    }
+}
+
+void main() {
+    int idx = int(gl_GlobalInvocationID.x);
+    proc_slice(idx);
+}

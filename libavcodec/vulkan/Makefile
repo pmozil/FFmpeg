@@ -24,7 +24,11 @@ OBJS-$(CONFIG_FFV1_VULKAN_HWACCEL)  +=  vulkan/common.o \
 OBJS-$(CONFIG_DIRAC_VULKAN_HWACCEL) += vulkan/common.o \
 					vulkan/vulkan_dirac_cpy_to_image_8bit.o \
 					vulkan/vulkan_dirac_cpy_to_image_10bit.o \
-					vulkan/vulkan_dirac_cpy_to_image_12bit.o
+					vulkan/vulkan_dirac_cpy_to_image_12bit.o \
+					vulkan/vulkan_dirac_legall_vert.o \
+					vulkan/vulkan_dirac_legall_horiz.o \
+					vulkan/vulkan_dirac_dequant.o \
+					vulkan/vulkan_dirac_structs.o
 
 VULKAN = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavcodec/vulkan/*.comp))
 .SECONDARY: $(VULKAN:.comp=.c)

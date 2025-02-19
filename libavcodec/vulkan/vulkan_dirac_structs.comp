@@ -1,0 +1,19 @@
+struct Slice {
+    int left;
+    int top;
+    int tot_h;
+    int tot_v;
+    int tot;
+    int offs;
+    int pad0;
+    int pad1;
+};
+
+struct SubbandOffset {
+    int base_off;
+    int stride;
+    int pad0;
+    int pad1;
+};
+
+#define DWT_LEVELS 5

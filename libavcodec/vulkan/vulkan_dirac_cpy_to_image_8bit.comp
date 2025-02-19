@@ -7,7 +7,7 @@ layout(push_constant, std430) uniform pushConstants {
 };
 
 
-void main() {);
+void main() {
     int x = int(gl_GlobalInvocationID.x);
     int y = int(gl_GlobalInvocationID.y);
     int plane = int(gl_GlobalInvocationID.z);
@@ -19,4 +19,4 @@ void main() {);
     float val = float(clamp(ival, 0, 256)) / 255.0;
     imageStore(out_img[plane], ivec2(x, y), vec4(val));
     memoryBarrier();
-});
+}
