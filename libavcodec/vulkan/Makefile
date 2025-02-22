@@ -27,6 +27,9 @@ OBJS-$(CONFIG_DIRAC_VULKAN_HWACCEL) += vulkan/common.o \
 					vulkan/vulkan_dirac_cpy_to_image_12bit.o \
 					vulkan/vulkan_dirac_legall_vert.o \
 					vulkan/vulkan_dirac_legall_horiz.o \
+					vulkan/vulkan_dirac_haar0_horiz.o \
+					vulkan/vulkan_dirac_haar1_horiz.o \
+					vulkan/vulkan_dirac_haar_vert.o \
 					vulkan/vulkan_dirac_dequant.o \
 					vulkan/vulkan_dirac_structs.o
 

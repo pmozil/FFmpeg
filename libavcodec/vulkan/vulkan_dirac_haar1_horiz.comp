@@ -1,0 +1,40 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+int getIdx(int plane, int x, int y) {
+  return plane_offs[plane] + plane_strides[plane] * y + x;
+}
+
+void idwt_horiz(int plane, int x, int y) {
+    int offs0 = plane_offs[plane] + plane_strides[plane] * y + x;
+    int offs1 = offs0 + plane_sizes[plane].x / 2;
+    int outIdx = plane_offs[plane] + plane_strides[plane] * y + x * 2;
+    int32_t val_orig0 = inBuf[offs0];
+    int32_t val_orig1 = inBuf[offs1];
+    int32_t val_new0 = val_orig0 - ((val_orig1 + 1) >> 1);
+    int32_t val_new1 = val_orig1 + val_new0;
+    outBuf[outIdx] = (val_new0 + 1) >> 1;
+    outBuf[outIdx + 1] = (val_new1 + 1) >> 1;
+}
+
+void main() {
+    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);
+    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);
+    int pic_z = int(gl_GlobalInvocationID.z);
+
+    uint h = int(plane_sizes[pic_z].y);
+    uint w = int(plane_sizes[pic_z].x);
+
+    int y = int(gl_GlobalInvocationID.y);
+    for (; y < h; y += off_y) {
+        int x = int(gl_GlobalInvocationID.x);
+        for (; 2 * x < w; x += off_x) {
+            idwt_horiz(pic_z, x, y);
+        }
+    }
+}
