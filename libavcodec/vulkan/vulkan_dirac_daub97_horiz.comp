@@ -1,0 +1,110 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+int getIdx(int plane, int x, int y) {
+  return plane_offs[plane] + plane_strides[plane] * y + x;
+}
+
+int32_t daub97_low1(int32_t v1, int32_t v2, int32_t v3) {
+  return  v2 - ((1817 * (v1 + v2) + 2048) >> 12);
+}
+
+int32_t daub97_high1(int32_t v1, int32_t v2, int32_t v3) {
+  return  v2 - ((113 * (v1 + v2) + 64) >> 7);
+}
+
+int32_t daub97_low0(int32_t v1, int32_t v2, int32_t v3) {
+  return  v2 - ((217 * (v1 + v2) + 2048) >> 12);
+}
+
+int32_t daub97_high0(int32_t v1, int32_t v2, int32_t v3) {
+  return  v2 - ((6947 * (v1 + v2) + 2048) >> 12);
+}
+
+int32_t daub97_low_x0(int plane, int x, int y) {
+    int w = plane_sizes[plane].x;
+    int dw = plane_sizes[plane].x / 2;
+
+    int x0 = (x == 0) ? dw : x + dw;
+    int32_t v0 = inBuf[getIdx(plane, x0, y)];
+
+    int32_t v1 = inBuf[getIdx(plane, x, y)];
+
+    int x2 = x + dw;
+    int32_t v2 = inBuf[getIdx(plane, x0, y)];
+
+    return daub97_low1(v0, v1, v2);
+}
+
+int32_t daub97_high_x0(int plane, int x, int y) {
+    int w = plane_sizes[plane].x;
+    int dw = plane_sizes[plane].x / 2;
+
+    int x0 = (x == dw - 1) ? (dw - 1) : (x - 1);
+    int32_t v0 = daub97_low_x0(plane, x0, y);
+
+    int32_t v1 = inBuf[getIdx(plane, x + dw - 1, y)];
+
+    int32_t v2 = daub97_low_x0(plane, x, y);
+
+    return daub97_high1(v0, v1, v2);
+}
+
+int32_t daub97_low_x1(int plane, int x, int y) {
+    int w = plane_sizes[plane].x;
+    int dw = plane_sizes[plane].x / 2;
+
+    int32_t v0 = daub97_high_x0(plane, x, y);
+
+    int32_t v1 = daub97_low_x0(plane, x, y);
+
+    int32_t v2 = daub97_high_x0(plane, x + 1, y);
+
+    return daub97_low0(v0, v1, v2);
+}
+
+int32_t daub97_high_x1(int plane, int x, int y) {
+    int w = plane_sizes[plane].x;
+    int dw = plane_sizes[plane].x / 2;
+
+    int x0 = clamp(x - 1, 0, dw);
+    int32_t v0 = daub97_low_x1(plane, x0, y);
+
+    int32_t v1 = daub97_high_x0(plane, x + 1, y);
+
+    int x2 = clamp(x, 0, dw);
+    int32_t v2 = daub97_low_x1(plane, x2, y);
+
+    return daub97_high0(v0, v1, v2);
+}
+
+void idwt_horiz(int plane, int x, int y) {
+    int w = plane_sizes[plane].x;
+    int dw = plane_sizes[plane].x / 2;
+
+    int32_t v0 = daub97_low_x1(plane, x, y);
+    int32_t v1 = daub97_high_x1(plane, x, y);
+
+    outBuf[getIdx(plane, 2 * x, y)]     = ~((~v0) >> 1);
+    outBuf[getIdx(plane, 2 * x + 1, y)] = ~((~v1) >> 1);
+}
+
+void main() {
+    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);
+    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);
+    int pic_z = int(gl_GlobalInvocationID.z);
+    uint h = int(plane_sizes[pic_z].y);
+    uint w = int(plane_sizes[pic_z].x);
+    int y = int(gl_GlobalInvocationID.y);
+    for (; y < h; y += off_y) {
+        int x = int(gl_GlobalInvocationID.x);
+        for (; 2 * x < w; x += off_x) {
+            idwt_horiz(pic_z, x, y);
+        }
+    }
+}

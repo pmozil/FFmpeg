@@ -1,0 +1,45 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+int getIdx(int plane, int x, int y) {
+  return plane_offs[plane] + plane_strides[plane] * y + x;
+}
+
+void main() {
+    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);
+    int pic_z = int(gl_GlobalInvocationID.z);
+
+    uint h = int(plane_sizes[pic_z].y);
+    uint w = int(plane_sizes[pic_z].x);
+    int x = int(gl_GlobalInvocationID.x);
+
+    for (; x < w; x += off_x) {
+        for (int y = 0; y < h; y += 2) {
+            int32_t v0 = inBuf[getIdx(pic_z, x, int(clamp(y - 1, 0, h)))];
+            int32_t v1 = inBuf[getIdx(pic_z, x, y + 1)];
+            inBuf[getIdx(pic_z, x, y)] -= (1817 * (v0 + v1 + 2048)) >> 12;
+        }
+        for (int y = 0; y < h; y += 2) {
+            int32_t v0 = inBuf[getIdx(pic_z, x, y)];
+            int32_t v1 = inBuf[getIdx(pic_z, x, int(clamp(y + 2, 0, h - 2)))];
+            inBuf[getIdx(pic_z, x, y + 1)] -= (3616 * (v0 + v1 + 2048)) >> 12;
+        }
+        for (int y = 0; y < h; y += 2) {
+            int32_t v0 = inBuf[getIdx(pic_z, x, int(clamp(y - 1, 0, h)))];
+            int32_t v1 = inBuf[getIdx(pic_z, x, y + 1)];
+            int32_t v2 = inBuf[getIdx(pic_z, x, y)];
+            outBuf[getIdx(pic_z, x, y)] = v2 + (217 * (v0 + v1 + 2048)) >> 12;
+        }
+        for (int y = 0; y < h; y += 2) {
+            int32_t v0 = inBuf[getIdx(pic_z, x, y)];
+            int32_t v1 = inBuf[getIdx(pic_z, x, int(clamp(y + 2, 0, h - 2)))];
+            int32_t v2 = inBuf[getIdx(pic_z, x, y + 1)];
+            outBuf[getIdx(pic_z, x, y + 1)] = v2 + (6497 * (v0 + v1 + 2048)) >> 12;
+        }
+    }
+}
