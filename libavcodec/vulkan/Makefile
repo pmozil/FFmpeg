@@ -29,6 +29,8 @@ OBJS-$(CONFIG_DIRAC_VULKAN_HWACCEL) += vulkan/common.o \
 					vulkan/vulkan_dirac/vulkan_dirac_daub97_horiz.o \
 					vulkan/vulkan_dirac/vulkan_dirac_dd97_vert.o \
 					vulkan/vulkan_dirac/vulkan_dirac_dd97_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_fidelity_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_fidelity_horiz.o \
 					vulkan/vulkan_dirac/vulkan_dirac_dd137_vert.o \
 					vulkan/vulkan_dirac/vulkan_dirac_dd137_horiz.o \
 					vulkan/vulkan_dirac/vulkan_dirac_legall_vert.o \
