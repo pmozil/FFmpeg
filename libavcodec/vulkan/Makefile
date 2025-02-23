@@ -22,20 +22,22 @@ OBJS-$(CONFIG_FFV1_VULKAN_HWACCEL)  +=  vulkan/common.o \
 					vulkan/ffv1_dec_setup.o vulkan/ffv1_dec.o
 
 OBJS-$(CONFIG_DIRAC_VULKAN_HWACCEL) += vulkan/common.o \
-					vulkan/vulkan_dirac_cpy_to_image_8bit.o \
-					vulkan/vulkan_dirac_cpy_to_image_10bit.o \
-					vulkan/vulkan_dirac_cpy_to_image_12bit.o \
-					vulkan/vulkan_dirac_daub97_vert.o \
-					vulkan/vulkan_dirac_daub97_horiz.o \
-					vulkan/vulkan_dirac_dd97_vert.o \
-					vulkan/vulkan_dirac_dd97_horiz.o \
-					vulkan/vulkan_dirac_legall_vert.o \
-					vulkan/vulkan_dirac_legall_horiz.o \
-					vulkan/vulkan_dirac_haar0_horiz.o \
-					vulkan/vulkan_dirac_haar1_horiz.o \
-					vulkan/vulkan_dirac_haar_vert.o \
-					vulkan/vulkan_dirac_dequant.o \
-					vulkan/vulkan_dirac_structs.o
+					vulkan/vulkan_dirac/vulkan_dirac_cpy_to_image_8bit.o \
+					vulkan/vulkan_dirac/vulkan_dirac_cpy_to_image_10bit.o \
+					vulkan/vulkan_dirac/vulkan_dirac_cpy_to_image_12bit.o \
+					vulkan/vulkan_dirac/vulkan_dirac_daub97_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_daub97_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_dd97_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_dd97_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_dd137_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_dd137_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_legall_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_legall_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_haar0_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_haar1_horiz.o \
+					vulkan/vulkan_dirac/vulkan_dirac_haar_vert.o \
+					vulkan/vulkan_dirac/vulkan_dirac_dequant.o \
+					vulkan/vulkan_dirac/vulkan_dirac_structs.o
 
 VULKAN = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavcodec/vulkan/*.comp))
 .SECONDARY: $(VULKAN:.comp=.c)

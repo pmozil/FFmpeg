@@ -1,4 +1,7 @@
 *.a
+*.mkv
+*.vc2
+*.mp4
 *.o
 *.o.*
 *.d
@@ -42,4 +45,5 @@
 /mapfile
 /tools/python/__pycache__/
 /libavcodec/vulkan/*.c
+/libavcodec/vulkan/vulkan_dirac/*.c
 /libavfilter/vulkan/*.c

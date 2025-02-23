@@ -1,0 +1,74 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+int getIdx(int plane, int x, int y) {
+  return plane_offs[plane] + plane_strides[plane] * y + x;
+}
+
+int32_t dd137_low(int32_t v0, int32_t v1, int32_t v2, int32_t v3, int32_t v4) {
+    return v2 - ((9 * v1 + 9 * v3 - v4 - v0 + 16) >> 5);
+}
+
+int32_t dd97_high(int32_t v1, int32_t v2, int32_t v3, int32_t v4, int32_t v5) {
+    return  v3 + ((9 * v4 + 9 * v2 - v5 - v1 + 8) >> 4);
+}
+
+int32_t dd137_low_x(int plane, int x, int y) {
+        const int w = plane_sizes[plane].x;
+        const int dw = w / 2;
+
+        const int x0 = (x > 1) ? x : dw;
+        const int32_t v0 = inBuf[getIdx(plane, x0, y)];
+
+        const int x1 = (x > 1) ? (x + dw - 2) : dw;
+        const int32_t v1 = inBuf[getIdx(plane, x1, y)];
+
+        const int x2 = x;
+        const int32_t v2 = inBuf[getIdx(plane, x2, y)];
+
+        const int x3 = x + dw;
+        const int32_t v3 = inBuf[getIdx(plane, x3, y)];
+
+        const int x4 = (x != dw - 1) ? (x + dw + 1) : (dw - 1);
+        const int32_t v4 = inBuf[getIdx(plane, x4, y)];
+
+        return dd137_low(v0, v1, v2, v3, v4);
+}
+
+void idwt_horiz(int plane, int x, int y) {
+    const int w = plane_sizes[plane].x;
+    const int dw = w / 2 - 1;
+
+    const int32_t out0 = dd137_low_x(plane, x, y);
+
+    const int32_t out_1 = ((x - 1) > 0) ? dd137_low_x(plane, x - 1, y) : out0;
+    const int32_t val3 = inBuf[getIdx(plane, x + dw + 1, y)];
+    const int32_t out1 = ((x + 1) <= dw) ? dd137_low_x(plane, x + 1, y) :
+                                            dd137_low_x(plane, dw, y);
+    const int32_t out2 = ((x + 2) <= dw) ? dd137_low_x(plane, x + 2, y) :
+                                            dd137_low_x(plane, dw, y);
+    const int32_t res  = dd97_high(out_1, out0, val3, out1, out2);
+
+    outBuf[getIdx(plane, 2 * x, y)]     = (out0 + 1) >> 1;
+    outBuf[getIdx(plane, 2 * x + 1, y)] = (res + 1) >> 1;
+}
+
+void main() {
+    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);
+    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);
+    int pic_z = int(gl_GlobalInvocationID.z);
+    uint h = int(plane_sizes[pic_z].y);
+    uint w = int(plane_sizes[pic_z].x);
+    int y = int(gl_GlobalInvocationID.y);
+    for (; y < h; y += off_y) {
+        int x = int(gl_GlobalInvocationID.x);
+        for (; 2 * x < w; x += off_x) {
+            idwt_horiz(pic_z, x, y);
+        }
+    }
+}

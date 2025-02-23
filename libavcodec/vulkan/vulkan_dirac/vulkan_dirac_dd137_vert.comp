@@ -1,0 +1,73 @@
+layout(push_constant, std430) uniform pushConstants {
+    ivec2 plane_sizes[3];
+    int plane_offs[3];
+    int plane_strides[3];
+    int dw[3];
+    int wavelet_depth;
+};
+
+int getIdx(int plane, int x, int y) {
+  return plane_offs[plane] + plane_strides[plane] * y + x;
+}
+
+int32_t dd137_low(int32_t v0, int32_t v1, int32_t v2, int32_t v3, int32_t v4) {
+    return v2 - ((9 * v1 + 9 * v3 - v4 - v0 + 16) >> 5);
+}
+
+int32_t dd97_high(int32_t v1, int32_t v2, int32_t v3, int32_t v4, int32_t v5) {
+    return  v3 + ((9 * v4 + 9 * v2 - v5 - v1 + 8) >> 4);
+}
+
+int32_t dd137_low_y(int plane, int x, int y) {
+    const int h = plane_sizes[plane].y;
+
+    const int y0 = (x > 3) ? (y - 3) : 1;
+    const int32_t v0 = inBuf[getIdx(plane, x, y0)];
+
+    const int y1 = (y > 1) ? (y - 1) : 1;
+    const int32_t v1 = inBuf[getIdx(plane, x, y1)];
+
+    const int y2 = y;
+    const int32_t v2 = inBuf[getIdx(plane, x, y2)];
+
+    const int y3 = y + 1;
+    const int32_t v3 = inBuf[getIdx(plane, x, y3)];
+
+    const int y4 = (y + 3 < h) ? (y + 3) : (h - 1);
+    const int32_t v4 = inBuf[getIdx(plane, x, y4)];
+
+    return dd137_low(v0, v1, v2, v3, v4);
+}
+
+void idwt_vert(int plane, int x, int y) {
+    const int h = plane_sizes[plane].y;
+
+    const int32_t out0 = dd137_low_y(plane, x, y);
+    const int32_t out_2 = (y - 2 > 0) ? dd137_low_y(plane, x, y - 2) :
+                                        dd137_low_y(plane, x, 0);
+    const int32_t out2 = (y + 2 < h) ? dd137_low_y(plane, x, y + 2) :
+                                        dd137_low_y(plane, x, h - 2);
+    const int32_t out4 = (y + 4 < h) ? dd137_low_y(plane, x, y + 4) :
+                                        dd137_low_y(plane, x, h - 2);
+    const int32_t val1 = inBuf[getIdx(plane, x, y + 1)];
+
+    outBuf[getIdx(plane, x, y)]     = out0;
+    outBuf[getIdx(plane, x, y + 1)] = dd97_high(out_2, out0, val1, out2, out4);
+}
+
+
+
+void main() {
+    int off_y = int(gl_WorkGroupSize.y * gl_NumWorkGroups.y);
+    int off_x = int(gl_WorkGroupSize.x * gl_NumWorkGroups.x);
+    int pic_z = int(gl_GlobalInvocationID.z);
+    uint h = int(plane_sizes[pic_z].y);
+    uint w = int(plane_sizes[pic_z].x);
+    int y = int(gl_GlobalInvocationID.y);
+    for (; 2 * y < h; y += off_y) {
+        int x = int(gl_GlobalInvocationID.x);
+        for (; x < w; x += off_x) {
+            idwt_vert(pic_z, x, 2 * y);
+        }
+    }
+}
