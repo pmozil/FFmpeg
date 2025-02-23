@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "avcodec.h"
 #include "dirac_dwt.h"
 #include "diracdec.h"
 #include "libavcodec/dirac_vlc.h"
@@ -307,7 +308,7 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
 extern const char *ff_source_vulkan_dirac_structs_comp;
 
-static int compile_shader(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
+static av_always_inline int inline compile_shader(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
                             FFVulkanShader *shd, FFVulkanDescriptorSetBinding *desc,
                             const int desc_size, const char *ext[], const int n_ext,
                             const char *shd_name, const char *shader,
@@ -345,6 +346,30 @@ fail:
         spv->free_shader(spv, &spv_opaque);
 
     return err;
+}
+
+static av_always_inline void inline setup_push_const(DiracVulkanDecodeContext *dec, DiracContext *ctx, int i) {
+    dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
+    dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
+    dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
+
+    dec->pConst.plane_offs[0] = 0;
+    dec->pConst.plane_offs[1] =
+        ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
+    dec->pConst.plane_offs[2] =
+        dec->pConst.plane_offs[1] +
+        ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
+
+    dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
+    dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
+    dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
+
+    dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
+    dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
+    dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
+    dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
+    dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
+    dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
 }
 
 /* ----- Copy Shader init and pipeline pass ----- */
@@ -598,27 +623,7 @@ static av_always_inline int inline wavelet_legall_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -666,19 +671,6 @@ static av_always_inline int inline wavelet_legall_pass(
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3, 3);
     }
-
-    barrier_num = *nb_buf_bar;
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-    vk->CmdPipelineBarrier2(
-        exec->buf, &(VkDependencyInfo){
-                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                       .pBufferMemoryBarriers = buf_bar + barrier_num,
-                       .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-                   });
 
     return 0;
 fail:
@@ -799,27 +791,7 @@ static av_always_inline int inline wavelet_fidelity_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -866,19 +838,6 @@ static av_always_inline int inline wavelet_fidelity_pass(
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3, 3);
     }
-
-    barrier_num = *nb_buf_bar;
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-    vk->CmdPipelineBarrier2(
-        exec->buf, &(VkDependencyInfo){
-                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                       .pBufferMemoryBarriers = buf_bar + barrier_num,
-                       .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-                   });
 
     return 0;
 fail:
@@ -996,27 +955,7 @@ static av_always_inline int inline wavelet_daub97_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -1194,27 +1133,7 @@ static av_always_inline int inline wavelet_dd97_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -1262,19 +1181,6 @@ static av_always_inline int inline wavelet_dd97_pass(
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3, 3);
     }
-
-    barrier_num = *nb_buf_bar;
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-    vk->CmdPipelineBarrier2(
-        exec->buf, &(VkDependencyInfo){
-                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                       .pBufferMemoryBarriers = buf_bar + barrier_num,
-                       .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-                   });
 
     return 0;
 fail:
@@ -1394,27 +1300,7 @@ static av_always_inline int inline wavelet_dd137_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -1462,19 +1348,6 @@ static av_always_inline int inline wavelet_dd137_pass(
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3, 3);
     }
-
-    barrier_num = *nb_buf_bar;
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-    vk->CmdPipelineBarrier2(
-        exec->buf, &(VkDependencyInfo){
-                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                       .pBufferMemoryBarriers = buf_bar + barrier_num,
-                       .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-                   });
 
     return 0;
 fail:
@@ -1596,27 +1469,7 @@ static av_always_inline int inline wavelet_haari_pass(
         goto fail;
 
     for (int i = ctx->wavelet_depth - 1; i >= 0; i--) {
-        dec->pConst.plane_strides[0] = ctx->plane[0].idwt.width << i;
-        dec->pConst.plane_strides[1] = ctx->plane[1].idwt.width << i;
-        dec->pConst.plane_strides[2] = ctx->plane[2].idwt.width << i;
-
-        dec->pConst.plane_offs[0] = 0;
-        dec->pConst.plane_offs[1] =
-            ctx->plane[0].idwt.width * ctx->plane[0].idwt.height;
-        dec->pConst.plane_offs[2] =
-            dec->pConst.plane_offs[1] +
-            ctx->plane[1].idwt.width * ctx->plane[1].idwt.height;
-
-        dec->pConst.dw[0] = ctx->plane[0].idwt.width >> (i + 1);
-        dec->pConst.dw[1] = ctx->plane[1].idwt.width >> (i + 1);
-        dec->pConst.dw[2] = ctx->plane[2].idwt.width >> (i + 1);
-
-        dec->pConst.real_plane_dims[0] = (ctx->plane[0].idwt.width) >> i;
-        dec->pConst.real_plane_dims[1] = (ctx->plane[0].idwt.height) >> i;
-        dec->pConst.real_plane_dims[2] = (ctx->plane[1].idwt.width) >> i;
-        dec->pConst.real_plane_dims[3] = (ctx->plane[1].idwt.height) >> i;
-        dec->pConst.real_plane_dims[4] = (ctx->plane[2].idwt.width) >> i;
-        dec->pConst.real_plane_dims[5] = (ctx->plane[2].idwt.height) >> i;
+        setup_push_const(dec, ctx, i);
 
         /* Vertical wavelet pass */
         ff_vk_shader_update_push_const(&dec->vkctx, exec, vert,
@@ -1664,19 +1517,6 @@ static av_always_inline int inline wavelet_haari_pass(
         vk->CmdDispatch(exec->buf, dec->pConst.real_plane_dims[0] >> 4,
                         dec->pConst.real_plane_dims[1] >> 3, 3);
     }
-
-    barrier_num = *nb_buf_bar;
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
-    bar_read(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-    bar_write(buf_bar, nb_buf_bar, &dec->tmp_interleave_buf);
-
-    vk->CmdPipelineBarrier2(
-        exec->buf, &(VkDependencyInfo){
-                       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                       .pBufferMemoryBarriers = buf_bar + barrier_num,
-                       .bufferMemoryBarrierCount = *nb_buf_bar - barrier_num,
-                   });
 
     return 0;
 fail:
