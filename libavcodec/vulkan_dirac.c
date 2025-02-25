@@ -54,8 +54,6 @@ typedef struct WaveletPushConst {
 
 typedef struct DiracVulkanDecodeContext {
     FFVulkanContext vkctx;
-    VkSamplerYcbcrConversion yuv_sampler;
-    VkSampler sampler;
 
     FFVulkanShader vert_wavelet[9];
     FFVulkanShader horiz_wavelet[9];
@@ -104,7 +102,6 @@ static void free_common(AVCodecContext *avctx) {
     DiracVulkanDecodeContext *dec = avctx->internal->hwaccel_priv_data;
     DiracContext *ctx = avctx->priv_data;
     FFVulkanContext *s = &dec->vkctx;
-    FFVulkanFunctions *vk = &dec->vkctx.vkfn;
 
     if (ctx->hwaccel_picture_private) {
         av_free(ctx->hwaccel_picture_private);
@@ -126,8 +123,6 @@ static void free_common(AVCodecContext *avctx) {
 
         ff_vk_shader_free(s, &dec->horiz_wavelet[i]);
     }
-    if (dec->sampler)
-        vk->DestroySampler(s->hwctx->act_dev, dec->sampler, s->hwctx->alloc);
 
     av_buffer_unref(&dec->av_quant_val_buf);
     av_buffer_unref(&dec->av_quant_buf);
@@ -384,7 +379,6 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
     const int planes = av_pix_fmt_count_planes(s->vkctx.output_format);
 
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -423,7 +417,7 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
     }
 
     err = compile_shader(s, spv, &s->cpy_to_image[idx],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "cpy_to_image", (const char *)shd_txt,
                         dims, sizeof(WaveletPushConst));
 
@@ -446,7 +440,7 @@ static av_always_inline int inline cpy_to_image_pass(
 
     ff_vk_shader_update_img_array(&dec->vkctx, exec, &dec->cpy_to_image[idx],
                                       pic->frame->avframe, views, 0, 1,
-                                      VK_IMAGE_LAYOUT_GENERAL, dec->sampler);
+                                      VK_IMAGE_LAYOUT_GENERAL, VK_NULL_HANDLE);
 
     dec->pConst.real_plane_dims[0] = ctx->plane[0].idwt.width;
     dec->pConst.real_plane_dims[1] = ctx->plane[0].idwt.height;
@@ -522,7 +516,6 @@ static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -546,7 +539,7 @@ static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_LEGALL5_3],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "legall_vert", (const char *)ff_source_vulkan_dirac_legall_vert_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -558,7 +551,6 @@ static int init_wavelet_shd_legall_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -582,7 +574,7 @@ static int init_wavelet_shd_legall_horiz(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_LEGALL5_3],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "legall_horiz", (const char *)ff_source_vulkan_dirac_legall_horiz_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -688,7 +680,6 @@ static int init_wavelet_shd_fidelity_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -712,7 +703,7 @@ static int init_wavelet_shd_fidelity_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_FIDELITY],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "fidelity_vert",
                          (const char *)ff_source_vulkan_dirac_fidelity_vert_comp,
                         dims, sizeof(WaveletPushConst));
@@ -725,7 +716,6 @@ static int init_wavelet_shd_fidelity_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -749,7 +739,7 @@ static int init_wavelet_shd_fidelity_horiz(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_FIDELITY],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "fidelity_horiz",
                          (const char *)ff_source_vulkan_dirac_fidelity_horiz_comp,
                         dims, sizeof(WaveletPushConst));
@@ -855,7 +845,6 @@ static int init_wavelet_shd_daub97_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -878,7 +867,7 @@ static int init_wavelet_shd_daub97_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DAUB9_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "daub97_vert", (const char *)ff_source_vulkan_dirac_daub97_vert_comp,
                         dims, sizeof(WaveletPushConst));
     return err;
@@ -890,7 +879,6 @@ static int init_wavelet_shd_daub97_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -913,7 +901,7 @@ static int init_wavelet_shd_daub97_horiz(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_DAUB9_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "daub97_horiz",
                         (const char *)ff_source_vulkan_dirac_daub97_horiz_comp,
                         dims, sizeof(WaveletPushConst));
@@ -1032,7 +1020,6 @@ static int init_wavelet_shd_dd97_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1056,7 +1043,7 @@ static int init_wavelet_shd_dd97_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DD9_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "dd97_vert", (const char *)ff_source_vulkan_dirac_dd97_vert_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1068,7 +1055,6 @@ static int init_wavelet_shd_dd97_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1092,7 +1078,7 @@ static int init_wavelet_shd_dd97_horiz(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_DD9_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "dd97_horiz", (const char *)ff_source_vulkan_dirac_dd97_horiz_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1199,7 +1185,6 @@ static int init_wavelet_shd_dd137_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1223,7 +1208,7 @@ static int init_wavelet_shd_dd137_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DD13_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "dd137_vert", (const char *)ff_source_vulkan_dirac_dd137_vert_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1235,7 +1220,6 @@ static int init_wavelet_shd_dd137_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1259,7 +1243,7 @@ static int init_wavelet_shd_dd137_horiz(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_DD13_7],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "dd137_horiz", (const char *)ff_source_vulkan_dirac_dd137_horiz_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1366,7 +1350,6 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1390,7 +1373,7 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s,
     };
 
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_HAAR0 + shift],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "haar_vert", (const char *)ff_source_vulkan_dirac_haar_vert_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1402,7 +1385,6 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s,
     int err = 0;
     int dims[3] = {8, 8, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1428,7 +1410,7 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s,
     const char *shd = shift ? ff_source_vulkan_dirac_haar1_horiz_comp :
                                 ff_source_vulkan_dirac_haar0_horiz_comp;
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_HAAR0 + shift],
-                        desc, 2, ext, 3,
+                        desc, 2, ext, 2,
                         "haar_horiz", (const char *)shd,
                         dims, sizeof(WaveletPushConst));
 
@@ -1532,7 +1514,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
     int err = 0;
     int dims[3] = {1, 1, 1};
     static const char *ext[] = {
-        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1588,7 +1569,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
 
 
     err = compile_shader(s, spv, &s->quant,
-                        desc, 6, ext, 3,
+                        desc, 6, ext, 2,
                         "dequant", (const char *)ff_source_vulkan_dirac_dequant_comp,
                         dims, sizeof(WaveletPushConst));
 
@@ -1815,11 +1796,6 @@ static int vulkan_dirac_init(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
-    err = ff_vk_init_sampler(&dec->vkctx, &dec->sampler, 1, VK_FILTER_LINEAR);
-    if (err < 0) {
-        goto fail;
-    }
-
     av_log(avctx, AV_LOG_VERBOSE, "Vulkan decoder initialization sucessful\n");
 
     err = init_quant_shd(dec, spv);
@@ -2021,6 +1997,7 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     FFVkExecContext *exec = ff_vk_exec_get(&dec->vkctx, &dec->exec_pool);
     enum dwt_type wavelet_idx = ctx->wavelet_idx + 2;
 
+    ff_vk_exec_wait(&dec->vkctx, exec);
     ff_vk_exec_start(&dec->vkctx, exec);
 
     err = quant_pl_pass(dec, ctx, exec, buf_bar, &nb_buf_bar);
@@ -2081,8 +2058,6 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
     if (err < 0)
         goto fail;
 
-    ff_vk_exec_wait(&dec->vkctx, exec);
-
     return 0;
 
 fail:
@@ -2115,11 +2090,6 @@ static int vulkan_dirac_update_thread_context(AVCodecContext *dst,
     err = ff_vk_exec_pool_init(&dst_ctx->vkctx, dst_ctx->qf, &dst_ctx->exec_pool, 8, 0, 0, 0, NULL);
     if (err < 0)
         goto fail;
-
-    err = ff_vk_init_sampler(&dst_ctx->vkctx, &dst_ctx->sampler, 1, VK_FILTER_LINEAR);
-    if (err < 0) {
-        goto fail;
-    }
 
     err = init_quant_shd(dst_ctx, spv);
     if (err < 0) {
