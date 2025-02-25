@@ -1,0 +1,22 @@
+// Generated from libavcodec/vulkan/dirac/dirac_structs.comp
+const char *ff_source_dirac_structs_comp =
+"struct Slice {\n"
+"    int left;\n"
+"    int top;\n"
+"    int tot_h;\n"
+"    int tot_v;\n"
+"    int tot;\n"
+"    int offs;\n"
+"    int pad0;\n"
+"    int pad1;\n"
+"};\n"
+"\n"
+"struct SubbandOffset {\n"
+"    int base_off;\n"
+"    int stride;\n"
+"    int pad0;\n"
+"    int pad1;\n"
+"};\n"
+"\n"
+"#define DWT_LEVELS 5\n"
+;
