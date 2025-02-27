@@ -45,5 +45,5 @@
 /mapfile
 /tools/python/__pycache__/
 /libavcodec/vulkan/*.c
-/libavcodec/vulkan/vulkan_dirac/*.c
+/libavcodec/vulkan/dirac/*.c
 /libavfilter/vulkan/*.c

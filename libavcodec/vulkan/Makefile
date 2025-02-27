@@ -22,6 +22,7 @@ OBJS-$(CONFIG_FFV1_VULKAN_HWACCEL)  +=  vulkan/common.o \
 					vulkan/ffv1_dec_setup.o vulkan/ffv1_dec.o
 
 OBJS-$(CONFIG_DIRAC_VULKAN_HWACCEL) += vulkan/common.o \
+					vulkan/dirac/dirac_vlc.o \
 					vulkan/dirac/dirac_cpy_to_image_8bit.o \
 					vulkan/dirac/dirac_cpy_to_image_10bit.o \
 					vulkan/dirac/dirac_cpy_to_image_12bit.o \

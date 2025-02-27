@@ -303,24 +303,24 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
 
 extern const char *ff_source_dirac_structs_comp;
 
-static av_always_inline int inline compile_shader(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
+static av_always_inline int inline compile_shader(DiracVulkanDecodeContext *s,
+                            FFVkSPIRVCompiler *spv,
                             FFVulkanShader *shd, FFVulkanDescriptorSetBinding *desc,
                             const int desc_size, const char *ext[], const int n_ext,
                             const char *shd_name, const char *shader,
-                            int dims[3], int push_c_size) {
+                            int dims[3], int push_c_size, int init) {
     int err = 0;
     size_t spv_len = 0;
     uint8_t *spv_data = NULL;
     void *spv_opaque = NULL;
     FFVulkanContext *vkctx = &s->vkctx;
 
-    RET(ff_vk_shader_init(vkctx, shd, shd_name,
-                          VK_SHADER_STAGE_COMPUTE_BIT, ext, n_ext,
-                          dims[0], dims[1], dims[2],
-                          0));
-
-    /* Common codec header */
-    GLSLD(ff_source_dirac_structs_comp);
+    if (init) {
+        RET(ff_vk_shader_init(vkctx, shd, shd_name,
+                              VK_SHADER_STAGE_COMPUTE_BIT, ext, n_ext,
+                              dims[0], dims[1], dims[2],
+                              0));
+    }
 
     if (push_c_size > 0) {
         RET(ff_vk_shader_add_descriptor_set(vkctx, shd, desc, desc_size, 1, 0));
@@ -419,7 +419,7 @@ static int init_cpy_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv,
     err = compile_shader(s, spv, &s->cpy_to_image[idx],
                         desc, 2, ext, 2,
                         "cpy_to_image", (const char *)shd_txt,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -541,7 +541,7 @@ static int init_wavelet_shd_legall_vert(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_LEGALL5_3],
                         desc, 2, ext, 2,
                         "legall_vert", (const char *)ff_source_dirac_legall_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -576,7 +576,7 @@ static int init_wavelet_shd_legall_horiz(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_LEGALL5_3],
                         desc, 2, ext, 2,
                         "legall_horiz", (const char *)ff_source_dirac_legall_horiz_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -706,7 +706,7 @@ static int init_wavelet_shd_fidelity_vert(DiracVulkanDecodeContext *s,
                         desc, 2, ext, 2,
                         "fidelity_vert",
                          (const char *)ff_source_dirac_fidelity_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -742,7 +742,7 @@ static int init_wavelet_shd_fidelity_horiz(DiracVulkanDecodeContext *s,
                         desc, 2, ext, 2,
                         "fidelity_horiz",
                          (const char *)ff_source_dirac_fidelity_horiz_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -869,7 +869,7 @@ static int init_wavelet_shd_daub97_vert(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DAUB9_7],
                         desc, 2, ext, 2,
                         "daub97_vert", (const char *)ff_source_dirac_daub97_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
     return err;
 
 }
@@ -904,7 +904,7 @@ static int init_wavelet_shd_daub97_horiz(DiracVulkanDecodeContext *s,
                         desc, 2, ext, 2,
                         "daub97_horiz",
                         (const char *)ff_source_dirac_daub97_horiz_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1045,7 +1045,7 @@ static int init_wavelet_shd_dd97_vert(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DD9_7],
                         desc, 2, ext, 2,
                         "dd97_vert", (const char *)ff_source_dirac_dd97_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1080,7 +1080,7 @@ static int init_wavelet_shd_dd97_horiz(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_DD9_7],
                         desc, 2, ext, 2,
                         "dd97_horiz", (const char *)ff_source_dirac_dd97_horiz_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1210,7 +1210,7 @@ static int init_wavelet_shd_dd137_vert(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_DD13_7],
                         desc, 2, ext, 2,
                         "dd137_vert", (const char *)ff_source_dirac_dd137_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1245,7 +1245,7 @@ static int init_wavelet_shd_dd137_horiz(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_DD13_7],
                         desc, 2, ext, 2,
                         "dd137_horiz", (const char *)ff_source_dirac_dd137_horiz_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1375,7 +1375,7 @@ static int init_wavelet_shd_haari_vert(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->vert_wavelet[DWT_DIRAC_HAAR0 + shift],
                         desc, 2, ext, 2,
                         "haar_vert", (const char *)ff_source_dirac_haar_vert_comp,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1412,7 +1412,7 @@ static int init_wavelet_shd_haari_horiz(DiracVulkanDecodeContext *s,
     err = compile_shader(s, spv, &s->horiz_wavelet[DWT_DIRAC_HAAR0 + shift],
                         desc, 2, ext, 2,
                         "haar_horiz", (const char *)shd,
-                        dims, sizeof(WaveletPushConst));
+                        dims, sizeof(WaveletPushConst), 1);
 
     return err;
 }
@@ -1509,6 +1509,7 @@ fail:
 // /* ----- Dequant Shader init and pipeline pass ----- */
 
 extern const char *ff_source_dirac_dequant_comp;
+extern const char *ff_source_dirac_vlc_comp;
 
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
     int err = 0;
@@ -1517,6 +1518,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
+    FFVulkanShader *shd = &s->quant;
 
     FFVulkanDescriptorSetBinding *desc = (FFVulkanDescriptorSetBinding[]){
         {
@@ -1568,11 +1570,19 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
     };
 
 
-    err = compile_shader(s, spv, &s->quant,
+    RET(ff_vk_shader_init(&s->vkctx, shd, "dequant",
+                            VK_SHADER_STAGE_COMPUTE_BIT, ext, 2,
+                            dims[0], dims[1], dims[2],
+                            0));
+    /* Common codec header */
+    GLSLD(ff_source_dirac_structs_comp);
+    GLSLD(ff_source_dirac_vlc_comp);
+
+    err = compile_shader(s, spv, shd,
                         desc, 6, ext, 2,
                         "dequant", (const char *)ff_source_dirac_dequant_comp,
-                        dims, sizeof(WaveletPushConst));
-
+                        dims, sizeof(WaveletPushConst), 0);
+fail:
     return err;
 }
 
