@@ -1509,7 +1509,6 @@ fail:
 // /* ----- Dequant Shader init and pipeline pass ----- */
 
 extern const char *ff_source_dirac_dequant_comp;
-extern const char *ff_source_dirac_vlc_comp;
 
 static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
     int err = 0;
@@ -1576,7 +1575,6 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
                             0));
     /* Common codec header */
     GLSLD(ff_source_dirac_structs_comp);
-    GLSLD(ff_source_dirac_vlc_comp);
 
     err = compile_shader(s, spv, shd,
                         desc, 6, ext, 2,

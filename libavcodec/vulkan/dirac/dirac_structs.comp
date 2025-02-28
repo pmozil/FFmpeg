@@ -23,7 +23,7 @@ struct Slice {
     int tot_v;
     int tot;
     int offs;
-    int pad0;
+    int len;
     int pad1;
 };
 
