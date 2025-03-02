@@ -82,11 +82,11 @@ void proc_slice(int slice_idx) {
 
                     x += lut.num;
 
-                    lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
                     offs++;
+                    lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
                 }
                 img_idx += sub_off.stride;
-                if (cur_idx != lut.num - 1) {
+                if (cur_idx != lut.num - 1 && y != s.tot_v - 1) {
                     x = cur_idx;
                     for (;x < lut.num; x++) {
                         outBuf0[img_idx + x] = buf[x];

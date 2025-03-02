@@ -27,6 +27,7 @@
 #include "libavutil/vulkan_loader.h"
 #include "libavutil/vulkan.h"
 #include "vulkan_decode.h"
+#include <string.h>
 
 typedef struct SubbandOffset {
     int base_off;
@@ -317,7 +318,7 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     SliceCoeffVk tmp[MAX_DWT_LEVELS];
     coef_buf_size =
         subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, tmp) + 8;
-    coef_buf_size = coef_buf_size + 512 * sizeof(int32_t);
+    coef_buf_size = coef_buf_size;
     dec->slice_vals_size = coef_buf_size;
 
     if (dec->quant_val_buf_vk_ptr) {
@@ -2264,6 +2265,7 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
         subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs,
                                   &slice_vk[MAX_DWT_LEVELS * i]);
         memcpy(tmp_buf, addr, length);
+        memset(tmp_buf + length, 0, dec->slice_vals_size - length);
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
