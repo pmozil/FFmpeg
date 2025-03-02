@@ -34,4 +34,17 @@ struct SubbandOffset {
     int pad1;
 };
 
+struct LUTState {
+    int16_t   val0;
+    int16_t   val1;
+    int16_t   val2;
+    int16_t   val3;
+    int16_t   val4;
+    uint8_t   val0_bits;
+    int8_t    sign;
+    int8_t    num;
+    uint8_t   val;
+    uint16_t  state;
+};
+
 #define DWT_LEVELS 5

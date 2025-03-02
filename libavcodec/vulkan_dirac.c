@@ -20,6 +20,7 @@
 #include "dirac_dwt.h"
 #include "diracdec.h"
 #include "libavcodec/dirac_vlc.h"
+#include "libavcodec/dirac_vlc.c"
 #include "libavcodec/pthread_internal.h"
 #include "libavutil/vulkan_spirv.h"
 #include "libavutil/vulkan_loader.h"
@@ -65,7 +66,7 @@ typedef struct DiracVulkanDecodeContext {
 
     int quant_val_buf_size;
     int thread_buf_size;
-    int32_t *quant_val_buf_vk_ptr;
+    uint8_t *quant_val_buf_vk_ptr;
     FFVkBuffer *quant_val_buf;
     AVBufferRef *av_quant_val_buf;
     size_t quant_val_buf_offs;
@@ -81,7 +82,11 @@ typedef struct DiracVulkanDecodeContext {
     int quant_buf_size;
     FFVkBuffer *slice_buf;
     AVBufferRef *av_slice_buf;
-    size_t slice_buf_offs;
+
+    int32_t *quant_lut_buf_vk_ptr;
+    int quant_lut_buf_size;
+    FFVkBuffer *quant_lut_buf_vk;
+    AVBufferRef *av_quant_lut_buf;
 
     FFVkBuffer tmp_buf;
     FFVkBuffer tmp_interleave_buf;
@@ -128,6 +133,7 @@ static void free_common(AVCodecContext *avctx) {
     av_buffer_unref(&dec->av_quant_buf);
     av_buffer_unref(&dec->av_slice_buf);
     av_buffer_unref(&dec->av_slice_buf);
+    av_buffer_unref(&dec->av_quant_lut_buf);
 
     ff_vk_free_buf(&dec->vkctx, &dec->subband_info);
 
@@ -221,6 +227,34 @@ static inline int alloc_host_mapped_buf(DiracVulkanDecodeContext *dec,
     return 0;
 }
 
+static int alloc_lut_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
+    int err, length = sizeof(LUTState) * 1024;
+
+    if (dec->quant_lut_buf_vk_ptr) {
+        av_buffer_unref(&dec->av_quant_lut_buf);
+    }
+
+
+    err = ff_vk_create_avbuf(&dec->vkctx, &dec->av_quant_lut_buf, length, NULL, NULL,
+                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    if (err < 0)
+        return err;
+
+    dec->quant_lut_buf_vk = (FFVkBuffer *)dec->av_quant_lut_buf->data;
+    err = ff_vk_map_buffer(&dec->vkctx, dec->quant_lut_buf_vk,
+                            (uint8_t **)&dec->quant_lut_buf_vk_ptr, 0);
+    if (err < 0)
+        return err;
+
+    memcpy(dec->quant_lut_buf_vk_ptr, dirac_golomb_lut, length);
+
+    ff_vk_unmap_buffer(&dec->vkctx, dec->quant_lut_buf_vk, 0);
+
+    return 0;
+}
+
 static int alloc_slices_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     int err, length = ctx->num_y * ctx->num_x;
 
@@ -283,7 +317,7 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     coef_buf_size =
         subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, tmp) + 8;
     coef_buf_size = coef_buf_size + 512 * sizeof(int32_t);
-    dec->slice_vals_size = coef_buf_size / sizeof(int32_t);
+    dec->slice_vals_size = coef_buf_size;
 
     if (dec->quant_val_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_val_buf);
@@ -1514,6 +1548,7 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
     int err = 0;
     int dims[3] = {1, 1, 1};
     static const char *ext[] = {
+        "GL_EXT_debug_printf",
         "GL_EXT_scalar_block_layout",
         "GL_EXT_shader_explicit_arithmetic_types",
     };
@@ -1540,8 +1575,10 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
             .name = "quant_in_buf",
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-            .buf_content = "int32_t inBuffer[];",
+            // .buf_content = "int32_t inBuffer[];",
+            .buf_content = "uint8_t inBuffer[];",
             .mem_quali = "readonly",
+            .dimensions = 1,
         },
         {
             .name = "quant_vals_buf",
@@ -1566,18 +1603,26 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
             .mem_quali = "readonly",
             .mem_layout = "std430",
         },
+        {
+            .name = "lut_buf",
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+            .buf_content = "LUTState dirac_golomb_lut[1024];",
+            .mem_quali = "readonly",
+            .mem_layout = "std430",
+        },
     };
 
 
     RET(ff_vk_shader_init(&s->vkctx, shd, "dequant",
-                            VK_SHADER_STAGE_COMPUTE_BIT, ext, 2,
+                            VK_SHADER_STAGE_COMPUTE_BIT, ext, 3,
                             dims[0], dims[1], dims[2],
                             0));
     /* Common codec header */
     GLSLD(ff_source_dirac_structs_comp);
 
     err = compile_shader(s, spv, shd,
-                        desc, 6, ext, 2,
+                        desc, 7, ext, 3,
                         "dequant", (const char *)ff_source_dirac_dequant_comp,
                         dims, sizeof(WaveletPushConst), 0);
 fail:
@@ -1626,6 +1671,12 @@ static av_always_inline int inline quant_pl_pass(
                                                 dec->subband_info.size, VK_FORMAT_UNDEFINED);
     if (err < 0)
         return err;
+    err = ff_vk_shader_update_desc_buffer(&dec->vkctx, exec, &dec->quant,
+                                                0, 6, 0, dec->quant_lut_buf_vk, 0,
+                                                dec->quant_lut_buf_vk->size,
+                                                VK_FORMAT_UNDEFINED);
+    if (err < 0)
+        return err;
 
     dec->pConst.real_plane_dims[0] = ctx->plane[0].idwt.width;
     dec->pConst.real_plane_dims[1] = ctx->plane[0].idwt.height;
@@ -1669,7 +1720,7 @@ static av_always_inline int inline quant_pl_pass(
                             });
 
     ff_vk_exec_bind_shader(&dec->vkctx, exec, &dec->quant);
-    vk->CmdDispatch(exec->buf, ctx->num_x * ctx->num_y, 3, ctx->wavelet_depth);
+    vk->CmdDispatch(exec->buf, ctx->num_x * ctx->num_y, 1, ctx->wavelet_depth);
 
     nb_bar = *nb_buf_bar;
     bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -1989,6 +2040,9 @@ static int vulkan_dirac_start_frame(AVCodecContext *avctx,
         err = alloc_tmp_bufs(c, s);
         if (err < 0)
             return err;
+        err = alloc_lut_buf(c, s);
+        if (err < 0)
+            return err;
     }
 
     return 0;
@@ -2166,7 +2220,7 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
     DiracVulkanDecodeContext *dec = s->avctx->internal->hwaccel_priv_data;
     int32_t *qfactor = &dec->quant_buf_vk_ptr[jobnr * 8 * MAX_DWT_LEVELS];
     int32_t *qoffset = &dec->quant_buf_vk_ptr[jobnr * 8 * MAX_DWT_LEVELS + 4];
-    int32_t *quant_val_base = dec->quant_val_buf_vk_ptr;
+    uint8_t *quant_val_base = dec->quant_val_buf_vk_ptr;
     DiracSlice *slice = &s->slice_params_buf[jobnr];
     SliceCoeffVk *slice_vk = &dec->slice_buf_vk_ptr[jobnr * 3 * MAX_DWT_LEVELS];
     GetBitContext *gb = &slice->gb;
@@ -2193,7 +2247,6 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
 
     /* Luma + 2 Chroma planes */
     for (i = 0; i < 3; i++) {
-        int coef_num, coef_par;
         int64_t length = s->highquality.size_scaler * get_bits(gb, 8);
         int64_t bits_end = get_bits_count(gb) + 8 * length;
         const uint8_t *addr = align_get_bits(gb);
@@ -2205,16 +2258,17 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
             return AVERROR_INVALIDDATA;
         }
 
-        coef_num = subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs,
+        subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs,
                                   &slice_vk[MAX_DWT_LEVELS * i]);
+        memcpy(tmp_buf, addr, length);
 
-        coef_par = ff_dirac_golomb_read_32bit(addr, length, tmp_buf, coef_num);
+        // coef_par = ff_dirac_golomb_read_32bit(addr, length, tmp_buf, coef_num);
 
-        if (coef_num > coef_par) {
-            const int start_b = coef_par * sizeof(int32_t);
-            const int end_b = coef_num * sizeof(int32_t);
-            memset(&tmp_buf[start_b], 0, end_b - start_b);
-        }
+        // if (coef_num > coef_par) {
+        //     const int start_b = coef_par * sizeof(int32_t);
+        //     const int end_b = coef_num * sizeof(int32_t);
+        //     memset(&tmp_buf[start_b], 0, end_b - start_b);
+        // }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
