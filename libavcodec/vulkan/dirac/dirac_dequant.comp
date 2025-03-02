@@ -30,46 +30,8 @@ void dequant(int outIdx, int idx, int qf, int qs) {
     outBuf0[outIdx] = outBuf1[outIdx] = val;
 }
 
-const uint16_t STATE_START  = uint16_t(0);
-const uint16_t STATE_FOLLOW = uint16_t(256);
-const uint16_t STATE_DATA   = uint16_t(512);
-const uint16_t STATE_SIGN   = uint16_t(768);
-
-int32_t dequant_imm(int val, int qf, int qs) {
+int32_t dequant_imm(int32_t val, int qf, int qs) {
     return sign(val) * ((abs(val) * qf + qs) >> 2);
-}
-
-void decode_and_dequant(int offs, int bytes, int dst, int qf, int qs)
-{
-    int next_val = inBuffer[offs];
-    int idx = 1;
-    int cur_idx = 0;
-    int num_all = 0;
-    int32_t val = 0;
-    LUTState lut = dirac_golomb_lut[inBuffer[offs]];
-
-    for (int i = 1; i < bytes; i++) {
-        val  = (val << lut.val0_bits) | lut.val0;
-        int real_dst = dst + cur_idx;
-        outBuf0[real_dst] = outBuf1[real_dst] = dequant_imm((val - 1) * lut.sign, qf, qs);
-        outBuf0[real_dst + 1] = outBuf1[real_dst + 1] = dequant_imm(lut.val1, qf, qs);
-        outBuf0[real_dst + 2] = outBuf1[real_dst + 2] = dequant_imm(lut.val2, qf, qs);
-        outBuf0[real_dst + 3] = outBuf1[real_dst + 3] = dequant_imm(lut.val3, qf, qs);
-        outBuf0[real_dst + 4] = outBuf1[real_dst + 4] = dequant_imm(lut.val4, qf, qs);
-        outBuf0[real_dst + 5] = outBuf1[real_dst + 5] = 0;
-        outBuf0[real_dst + 6] = outBuf1[real_dst + 6] = 0;
-        outBuf0[real_dst + 7] = outBuf1[real_dst + 7] = 0;
-        if (lut.num != 0) {
-            val = lut.val;
-        }
-        cur_idx += lut.num;
-        if (cur_idx >= bytes){
-            return;
-        }
-        idx++;
-        next_val = int(inBuffer[offs + idx]);
-        lut = dirac_golomb_lut[lut.state + next_val];
-    }
 }
 
 void proc_slice(int slice_idx) {
@@ -83,8 +45,7 @@ void proc_slice(int slice_idx) {
     int offs = s.offs;
 
     for(int level = 0; level < wavelet_depth; level++) {
-        Slice s = slices[base_slice_idx + level];
-
+        s = slices[base_slice_idx + level];
 
         for(int orient = int(bool(level)); orient < 4; orient++) {
             int32_t qf = quantMatrix[base_idx + level * 8 + orient];
@@ -97,7 +58,6 @@ void proc_slice(int slice_idx) {
             int img_idx = plane_offs[plane] + sub_off.base_off
                             + s.top * sub_off.stride + s.left;
             LUTState lut = dirac_golomb_lut[inBuffer[offs]];
-            offs++;
 
             int x = 0;
             int32_t val = 0;
@@ -121,26 +81,20 @@ void proc_slice(int slice_idx) {
                     }
 
                     x += lut.num;
-                    debugPrintfEXT("Val0: %i\n", buf[0]);
 
                     lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
                     offs++;
                 }
                 img_idx += sub_off.stride;
-                x = cur_idx;
-                // for (;x <= lut.num; x++) {
-                //     outBuf0[img_idx + x] = buf[x];
-                //     outBuf1[img_idx + x] = buf[x];
-                // }
-                // for(int x = 0; x < s.tot_h;) {
-                //     offs++;
-                //     val = (val << lut.val0_bits) | lut.val0;
-                //     debugPrintfEXT("Val0 bits: %i\n", int(lut.val0_bits));
-                //     x += lut.num;
-                //     lut = dirac_golomb_lut[offs + lut.state];
-                //     offs++;
-                //     // outBuf0[img_x + x] = outBuf1[img_x + x]
-                // }
+                if (cur_idx != lut.num - 1) {
+                    x = cur_idx;
+                    for (;x < lut.num; x++) {
+                        outBuf0[img_idx + x] = buf[x];
+                        outBuf1[img_idx + x] = buf[x];
+                    }
+                } else {
+                    x = 0;
+                }
             }
         }
     }

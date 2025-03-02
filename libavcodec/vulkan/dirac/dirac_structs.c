@@ -25,7 +25,7 @@ const char *ff_source_dirac_structs_comp =
 "    int tot_v;\n"
 "    int tot;\n"
 "    int offs;\n"
-"    int len;\n"
+"    int pad0;\n"
 "    int pad1;\n"
 "};\n"
 "\n"

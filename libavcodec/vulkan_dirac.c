@@ -19,6 +19,7 @@
 #include "avcodec.h"
 #include "dirac_dwt.h"
 #include "diracdec.h"
+#include "get_bits.h"
 #include "libavcodec/dirac_vlc.h"
 #include "libavcodec/dirac_vlc.c"
 #include "libavcodec/pthread_internal.h"
@@ -305,7 +306,7 @@ static int subband_coeffs(const DiracContext *s, int x, int y, int p, int off,
         o->tot_h = ((b->width * (x + 1)) / s->num_x) - o->left;
         o->tot_v = ((b->height * (y + 1)) / s->num_y) - o->top;
         o->tot = o->tot_h * o->tot_v;
-        o->offs = off + coef;
+        o->offs = off;
         coef += o->tot * (4 - !!level);
     }
     return coef;
@@ -1720,7 +1721,7 @@ static av_always_inline int inline quant_pl_pass(
                             });
 
     ff_vk_exec_bind_shader(&dec->vkctx, exec, &dec->quant);
-    vk->CmdDispatch(exec->buf, ctx->num_x * ctx->num_y, 1, ctx->wavelet_depth);
+    vk->CmdDispatch(exec->buf, ctx->num_x * ctx->num_y, 3, 1);
 
     nb_bar = *nb_buf_bar;
     bar_write(buf_bar, nb_buf_bar, &dec->tmp_buf);
@@ -2110,6 +2111,8 @@ static int vulkan_dirac_end_frame(AVCodecContext *avctx) {
         err = AVERROR_PATCHWELCOME;
         break;
     }
+    if (err < 0)
+        goto fail;
 
     err = cpy_to_image_pass(dec, ctx, exec, views, buf_bar, &nb_buf_bar,
                             img_bar, &nb_img_bar, (ctx->bit_depth - 8) >> 1);
@@ -2261,14 +2264,6 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
         subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs,
                                   &slice_vk[MAX_DWT_LEVELS * i]);
         memcpy(tmp_buf, addr, length);
-
-        // coef_par = ff_dirac_golomb_read_32bit(addr, length, tmp_buf, coef_num);
-
-        // if (coef_num > coef_par) {
-        //     const int start_b = coef_par * sizeof(int32_t);
-        //     const int end_b = coef_num * sizeof(int32_t);
-        //     memset(&tmp_buf[start_b], 0, end_b - start_b);
-        // }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
