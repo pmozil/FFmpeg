@@ -75,25 +75,21 @@ void proc_slice(int slice_idx) {
                     buf[6] = 0;
                     buf[7] = 0;
                     val = lut.num == 0 ? val : lut.val;
-                    for (cur_idx = 0; x + cur_idx < s.tot_h && cur_idx < lut.num; cur_idx++) {
-                        outBuf0[img_idx + x + cur_idx] = buf[cur_idx];
-                        outBuf1[img_idx + x + cur_idx] = buf[cur_idx];
+                    for (cur_idx = 0; x < s.tot_h && cur_idx < lut.num; cur_idx++) {
+                        outBuf0[img_idx + x] = buf[cur_idx];
+                        outBuf1[img_idx + x] = buf[cur_idx];
+                        x++;
                     }
-
-                    x += lut.num;
 
                     offs++;
                     lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
                 }
                 img_idx += sub_off.stride;
-                if (cur_idx != lut.num - 1 && y != s.tot_v - 1) {
-                    x = cur_idx;
-                    for (;x < lut.num; x++) {
-                        outBuf0[img_idx + x] = buf[x];
-                        outBuf1[img_idx + x] = buf[x];
-                    }
-                } else {
-                    x = 0;
+                x = 0;
+                for (;cur_idx < lut.num && y != s.tot_v - 1; cur_idx++) {
+                    outBuf0[img_idx + x] = buf[cur_idx];
+                    outBuf1[img_idx + x] = buf[cur_idx];
+                    x++;
                 }
             }
         }
