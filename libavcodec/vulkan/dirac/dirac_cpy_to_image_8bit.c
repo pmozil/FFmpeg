@@ -36,7 +36,7 @@ const char *ff_source_dirac_cpy_to_image_8bit_comp =
 "    }\n"
 "    int idx = plane_offs[plane] + y * plane_strides[plane] + x;\n"
 "    int32_t ival = inBuf[idx] + 128;\n"
-"    float val = float(clamp(ival, 0, 256)) / 255.0;\n"
+"    float val = float(clamp(ival, 0, 255)) / 255.0;\n"
 "    imageStore(out_img[plane], ivec2(x, y), vec4(val));\n"
 "    memoryBarrier();\n"
 "}\n"

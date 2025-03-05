@@ -43,7 +43,7 @@ typedef struct SliceCoeffVk {
     int tot_v;
     int tot;
     int offs;
-    int pad0;
+    int len;
     int pad1;
 } SliceCoeffVk;
 
@@ -295,7 +295,7 @@ static int alloc_dequant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     return 0;
 }
 
-static int subband_coeffs(const DiracContext *s, int x, int y, int p, int off,
+static int subband_coeffs(const DiracContext *s, int x, int y, int p, int off, int len,
                           SliceCoeffVk *c) {
     int level, coef = 0;
     for (level = 0; level <= s->wavelet_depth; level++) {
@@ -308,6 +308,7 @@ static int subband_coeffs(const DiracContext *s, int x, int y, int p, int off,
         o->tot_v = ((b->height * (y + 1)) / s->num_y) - o->top;
         o->tot = o->tot_h * o->tot_v;
         o->offs = off;
+        o->len = 0;
         coef += o->tot * (4 - !!level);
     }
     return coef;
@@ -317,9 +318,8 @@ static int alloc_quant_buf(DiracContext *ctx, DiracVulkanDecodeContext *dec) {
     int err, length = ctx->num_y * ctx->num_x, coef_buf_size;
     SliceCoeffVk tmp[MAX_DWT_LEVELS];
     coef_buf_size =
-        subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, tmp) + 8;
-    coef_buf_size = coef_buf_size;
-    dec->slice_vals_size = coef_buf_size;
+        subband_coeffs(ctx, ctx->num_x - 1, ctx->num_y - 1, 0, 0, 0, tmp) + 8;
+    dec->slice_vals_size = coef_buf_size ;
 
     if (dec->quant_val_buf_vk_ptr) {
         av_buffer_unref(&dec->av_quant_val_buf);
@@ -2255,6 +2255,7 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
         int64_t bits_end = get_bits_count(gb) + 8 * length;
         const uint8_t *addr = align_get_bits(gb);
         int offs = dec->slice_vals_size * (3 * jobnr + i);
+        int coef_num = 0;
         uint8_t *tmp_buf = (uint8_t *)&quant_val_base[offs];
 
         if (length * 8 > get_bits_left(gb)) {
@@ -2262,10 +2263,9 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
             return AVERROR_INVALIDDATA;
         }
 
-        subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs,
+        coef_num = subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs, length,
                                   &slice_vk[MAX_DWT_LEVELS * i]);
         memcpy(tmp_buf, addr, length);
-        memset(tmp_buf + length, 0, dec->slice_vals_size - length);
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }

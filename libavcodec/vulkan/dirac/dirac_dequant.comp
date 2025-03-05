@@ -24,12 +24,6 @@ layout(push_constant, std430) uniform pushConstants {
     int wavelet_depth;
 };
 
-void dequant(int outIdx, int idx, int qf, int qs) {
-    int32_t val = inBuffer[idx];
-    val = sign(val) * ((abs(val) * qf + qs) >> 2);
-    outBuf0[outIdx] = outBuf1[outIdx] = val;
-}
-
 int32_t dequant_imm(int32_t val, int qf, int qs) {
     return sign(val) * ((abs(val) * qf + qs) >> 2);
 }
@@ -42,7 +36,9 @@ void proc_slice(int slice_idx) {
 
 
     Slice s = slices[base_slice_idx];
+    int len = s.len;
     int offs = s.offs;
+    int n = 0;
 
     for(int level = 0; level < wavelet_depth; level++) {
         s = slices[base_slice_idx + level];
@@ -57,7 +53,7 @@ void proc_slice(int slice_idx) {
             const SubbandOffset sub_off = subband_offs[subband_idx];
             int img_idx = plane_offs[plane] + sub_off.base_off
                             + s.top * sub_off.stride + s.left;
-            LUTState lut = dirac_golomb_lut[inBuffer[offs]];
+            LUTState lut = dirac_golomb_lut[inBuffer[offs]], prev_lut;
 
             int x = 0;
             int32_t val = 0;
@@ -65,31 +61,47 @@ void proc_slice(int slice_idx) {
                 int32_t buf[8];
                 int cur_idx = 0;
                 while (x < s.tot_h) {
-                    val  = (val << lut.val0_bits) | lut.val0;
-                    buf[0] = dequant_imm((val - 1) * lut.sign, qf, qs);
-                    buf[1] = dequant_imm(lut.val1, qf, qs);
-                    buf[2] = dequant_imm(lut.val2, qf, qs);
-                    buf[3] = dequant_imm(lut.val3, qf, qs);
-                    buf[4] = dequant_imm(lut.val4, qf, qs);
-                    buf[5] = 0;
-                    buf[6] = 0;
-                    buf[7] = 0;
-                    val = lut.num == 0 ? val : lut.val;
-                    for (cur_idx = 0; x < s.tot_h && cur_idx < lut.num; cur_idx++) {
-                        outBuf0[img_idx + x] = buf[cur_idx];
-                        outBuf1[img_idx + x] = buf[cur_idx];
+                    if (n <= len) {
+                        val  = (val << lut.val0_bits) | lut.val0;
+                        buf[0] = dequant_imm((val - 1) * lut.sign, qf, qs);
+                        buf[1] = dequant_imm(lut.val1, qf, qs);
+                        buf[2] = dequant_imm(lut.val2, qf, qs);
+                        buf[3] = dequant_imm(lut.val3, qf, qs);
+                        buf[4] = dequant_imm(lut.val4, qf, qs);
+                        buf[5] = 0;
+                        buf[6] = 0;
+                        buf[7] = 0;
+                        val = lut.num == 0 ? val : lut.val;
+                    }
+                    int min_it = min(s.tot_h - x, lut.num);
+                    for (cur_idx = 0; cur_idx < min_it; cur_idx++) {
+                        if (n > len) {
+                            outBuf0[img_idx + x] = 0;
+                            outBuf1[img_idx + x] = 0;
+                        } else {
+                            outBuf0[img_idx + x] = buf[cur_idx];
+                            outBuf1[img_idx + x] = buf[cur_idx];
+                        }
                         x++;
+                        n++;
                     }
 
                     offs++;
+                    prev_lut = lut;
                     lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
                 }
                 img_idx += sub_off.stride;
                 x = 0;
-                for (;cur_idx < lut.num && y != s.tot_v - 1; cur_idx++) {
-                    outBuf0[img_idx + x] = buf[cur_idx];
-                    outBuf1[img_idx + x] = buf[cur_idx];
+                for (;cur_idx < prev_lut.num && y != s.tot_v - 1; cur_idx++) {
+                    if (n > len) {
+                        outBuf0[img_idx + x] = 0;
+                        outBuf1[img_idx + x] = 0;
+                    } else {
+                        outBuf0[img_idx + x] = buf[cur_idx];
+                        outBuf1[img_idx + x] = buf[cur_idx];
+                    }
                     x++;
+                    n++;
                 }
             }
         }
