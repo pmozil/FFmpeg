@@ -308,7 +308,7 @@ static int subband_coeffs(const DiracContext *s, int x, int y, int p, int off, i
         o->tot_v = ((b->height * (y + 1)) / s->num_y) - o->top;
         o->tot = o->tot_h * o->tot_v;
         o->offs = off;
-        o->len = 0;
+        o->len = len;
         coef += o->tot * (4 - !!level);
     }
     return coef;
@@ -1562,25 +1562,24 @@ static int init_quant_shd(DiracVulkanDecodeContext *s, FFVkSPIRVCompiler *spv) {
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .buf_content = "int32_t outBuf0[];",
+            .mem_layout = "std430",
             .mem_quali = "writeonly",
-            .dimensions = 1,
         },
         {
             .name = "out_buf_1",
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .buf_content = "int32_t outBuf1[];",
+            .mem_layout = "std430",
             .mem_quali = "writeonly",
-            .dimensions = 1,
         },
         {
             .name = "quant_in_buf",
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-            // .buf_content = "int32_t inBuffer[];",
             .buf_content = "uint8_t inBuffer[];",
+            .mem_layout = "std430",
             .mem_quali = "readonly",
-            .dimensions = 1,
         },
         {
             .name = "quant_vals_buf",
@@ -2255,7 +2254,6 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
         int64_t bits_end = get_bits_count(gb) + 8 * length;
         const uint8_t *addr = align_get_bits(gb);
         int offs = dec->slice_vals_size * (3 * jobnr + i);
-        int coef_num = 0;
         uint8_t *tmp_buf = (uint8_t *)&quant_val_base[offs];
 
         if (length * 8 > get_bits_left(gb)) {
@@ -2263,11 +2261,10 @@ static inline int decode_hq_slice(const DiracContext *s, int jobnr) {
             return AVERROR_INVALIDDATA;
         }
 
-        coef_num = subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs, length,
-                                  &slice_vk[MAX_DWT_LEVELS * i]);
-        memcpy(tmp_buf, addr, length);
-
         skip_bits_long(gb, bits_end - get_bits_count(gb));
+        memcpy(tmp_buf, addr, length);
+        subband_coeffs(s, slice->slice_x, slice->slice_y, i, offs, length,
+                                  &slice_vk[MAX_DWT_LEVELS * i]);
     }
 
     return 0;

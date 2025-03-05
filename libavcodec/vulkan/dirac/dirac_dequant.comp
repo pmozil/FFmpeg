@@ -56,18 +56,19 @@ void proc_slice(int slice_idx) {
             LUTState lut = dirac_golomb_lut[inBuffer[offs]], prev_lut;
 
             int x = 0;
-            int32_t val = 0;
+            uint32_t val = 0;
             for(int y = 0; y < s.tot_v; y++) {
                 int32_t buf[8];
                 int cur_idx = 0;
                 while (x < s.tot_h) {
                     if (n <= len) {
-                        val  = (val << lut.val0_bits) | lut.val0;
-                        buf[0] = dequant_imm((val - 1) * lut.sign, qf, qs);
-                        buf[1] = dequant_imm(lut.val1, qf, qs);
-                        buf[2] = dequant_imm(lut.val2, qf, qs);
-                        buf[3] = dequant_imm(lut.val3, qf, qs);
-                        buf[4] = dequant_imm(lut.val4, qf, qs);
+                        val <<= lut.val0_bits;
+                        val |= lut.val0;
+                        buf[0] = dequant_imm(int(val - 1) * lut.sign, qf, qs);
+                        buf[1] = dequant_imm(int32_t(lut.val1), qf, qs);
+                        buf[2] = dequant_imm(int32_t(lut.val2), qf, qs);
+                        buf[3] = dequant_imm(int32_t(lut.val3), qf, qs);
+                        buf[4] = dequant_imm(int32_t(lut.val4), qf, qs);
                         buf[5] = 0;
                         buf[6] = 0;
                         buf[7] = 0;
@@ -83,9 +84,9 @@ void proc_slice(int slice_idx) {
                             outBuf1[img_idx + x] = buf[cur_idx];
                         }
                         x++;
-                        n++;
                     }
 
+                    n++;
                     offs++;
                     prev_lut = lut;
                     lut = dirac_golomb_lut[lut.state + inBuffer[offs]];
@@ -101,7 +102,6 @@ void proc_slice(int slice_idx) {
                         outBuf1[img_idx + x] = buf[cur_idx];
                     }
                     x++;
-                    n++;
                 }
             }
         }
